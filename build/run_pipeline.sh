@@ -1,63 +1,82 @@
 #!/bin/bash
-# Full pipeline orchestrator — run this once on the build machine.
+# HyperRetrieval — Juspay build pipeline
+# Runs stages 01→05, 07, 08. Stage 06 (co-change) is skipped — already built.
+# Usage: bash run_pipeline.sh [--from-stage N] [--only-stage N]
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+# ── Paths (all fixed for this machine) ───────────────────────────────────────
+export PY="/home/beast/miniconda3/bin/python3"
+export WORKSPACE_DIR="/home/beast/projects/workspaces/juspay"
+export REPO_ROOT="$WORKSPACE_DIR/source"
+export OUTPUT_DIR="$WORKSPACE_DIR/output"
+export ARTIFACT_DIR="$WORKSPACE_DIR/artifacts"
+export EMBED_MODEL="/home/beast/projects/models/qwen3-embed-8b"
+export CONFIG_PATH="$WORKSPACE_DIR/config.yaml"
 
-REPO_ROOT="${REPO_ROOT:-$(dirname "$SCRIPT_DIR")/repo}"
-export REPO_ROOT
-
-VENV="$SCRIPT_DIR/.venv"
-PY="$VENV/bin/python3"
-
-echo "============================================"
-echo " Codebase Mind Map — Build Pipeline"
-echo "============================================"
-echo " Repo root:  $REPO_ROOT"
-echo " LM Studio:  ${LM_STUDIO_URL:-http://172.18.0.1:1234/v1}"
-echo " Python:     $PY"
-echo "============================================"
-echo ""
-
-# Create venv if needed
-if [ ! -f "$PY" ]; then
-  echo "[setup] Creating virtual environment..."
-  python3 -m venv "$VENV"
+# ── LLM (key already in config.yaml — also readable from env) ────────────────
+export LLM_BASE_URL="https://grid.ai.juspay.net"
+export LLM_MODEL="kimi-latest"
+# LLM_API_KEY falls through from shell env (set via KIMI_API_KEY → LLM_API_KEY)
+# or is read directly from config.yaml by each stage.
+if [ -z "$LLM_API_KEY" ] && [ -n "$KIMI_API_KEY" ]; then
+  export LLM_API_KEY="$KIMI_API_KEY"
 fi
 
-echo "[setup] Installing dependencies..."
-"$VENV/bin/pip" install -q \
-  networkx python-louvain sentence-transformers \
-  lancedb pyarrow openai torch chainlit
+# ── Embed server (GPU model running as separate process) ──────────────────────
+export EMBED_SERVER_URL="http://localhost:8001"
+export HF_HUB_OFFLINE="1"
+export TRANSFORMERS_OFFLINE="1"
+
+# ── Args ─────────────────────────────────────────────────────────────────────
+FROM_STAGE=1
+ONLY_STAGE=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --from-stage) FROM_STAGE="$2"; shift 2 ;;
+    --only-stage) ONLY_STAGE="$2"; shift 2 ;;
+    *) echo "Unknown arg: $1"; exit 1 ;;
+  esac
+done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+run_stage() {
+  local n="$1"; local label="$2"; local script="$3"
+  if [ -n "$ONLY_STAGE" ] && [ "$ONLY_STAGE" != "$n" ]; then return; fi
+  if [ "$n" -lt "$FROM_STAGE" ]; then return; fi
+  echo ""
+  echo "══════════════════════════════════════════════"
+  echo " Stage $n — $label"
+  echo "══════════════════════════════════════════════"
+  time "$PY" "$SCRIPT_DIR/$script"
+}
+
+echo "══════════════════════════════════════════════"
+echo " HyperRetrieval — Juspay Build Pipeline"
+echo "══════════════════════════════════════════════"
+echo " REPO_ROOT:    $REPO_ROOT"
+echo " OUTPUT_DIR:   $OUTPUT_DIR"
+echo " ARTIFACT_DIR: $ARTIFACT_DIR"
+echo " EMBED_MODEL:  $EMBED_MODEL"
+echo " LLM:          $LLM_MODEL @ $LLM_BASE_URL"
+echo " From stage:   $FROM_STAGE"
+[ -n "$ONLY_STAGE" ] && echo " Only stage:   $ONLY_STAGE"
+echo "══════════════════════════════════════════════"
+
+mkdir -p "$OUTPUT_DIR" "$ARTIFACT_DIR"
+
+run_stage 1 "Extract symbols (tree-sitter)"     01_extract.py
+run_stage 2 "Graph clustering (Leiden)"          02_build_graph.py
+run_stage 3 "GPU embedding → LanceDB"            03_embed.py
+run_stage 4 "Cluster summarisation (Kimi)"       04_summarize.py
+run_stage 5 "Package artifacts"                  05_package.py
+# Stage 6 (co-change) intentionally skipped — already built, takes hours
+run_stage 7 "Chunk docs → LanceDB"               07_chunk_docs.py
+run_stage 8 "Auto-generate architecture docs"    08_generate_arch_docs.py
 
 echo ""
-echo "[stage 1] Extracting symbols from source + git..."
-time "$PY" 01_extract.py
-echo ""
-
-echo "[stage 2] Building graph + Louvain clustering..."
-time "$PY" 02_build_graph.py
-echo ""
-
-echo "[stage 3] GPU embedding → LanceDB..."
-time "$PY" 03_embed.py
-echo ""
-
-echo "[stage 4] Cluster summarisation via LM Studio..."
-time "$PY" 04_summarize.py
-echo ""
-
-echo "[stage 5] Packaging demo artifact..."
-"$PY" 05_package.py
-echo ""
-
-echo "[model] Downloading GGUF for MacBook demo..."
-bash demo_artifact/download_model.sh
-echo ""
-
-echo "============================================"
+echo "══════════════════════════════════════════════"
 echo " Pipeline complete!"
-echo " Transfer: copy demo_artifact/ to MacBook"
-echo " Demo:     cd demo_artifact && bash run_demo.sh"
-echo "============================================"
+echo " Artifacts: $ARTIFACT_DIR"
+echo " Restart Chainlit: ~/start_chainlit.sh"
+echo "══════════════════════════════════════════════"
