@@ -1,0 +1,74 @@
+# config.yaml — codebase-intelligence engine configuration
+#
+# Copy this to config.yaml and fill in your values.
+# Pass it to any entry point:
+#   python3 mcp_server.py --config /path/to/config.yaml
+#   python3 pr_analyzer.py --config config.yaml --files src/foo.py
+
+# ── LLM (any OpenAI-compatible API) ──────────────────────────────────────────
+llm:
+  api_key:  "${KIMI_API_KEY}"         # env var reference or literal key
+  base_url: "https://grid.ai.juspay.net"
+  model:    "kimi-latest"
+
+  # OpenAI example:
+  # api_key:  "${OPENAI_API_KEY}"
+  # base_url: "https://api.openai.com/v1"
+  # model:    "gpt-4o"
+
+# ── Embedding model ───────────────────────────────────────────────────────────
+embed:
+  # Option A: shared embed server (recommended — avoids GPU conflicts)
+  server_url: "http://localhost:8001"
+
+  # Option B: load model in-process (comment out server_url)
+  # model_path: "/path/to/models/qwen3-embed-8b"
+
+  # Custom instruction prefix for your codebase
+  instruction: "Instruct: Represent this code module for finding semantically similar components. Query: "
+
+# ── Artifact directory ────────────────────────────────────────────────────────
+# Where to find: graph_with_summaries.json, vectors.lance, output/
+artifact_dir: "/home/beast/projects/mindmap/pipeline/demo_artifact"
+
+# ── Services (list all microservices in your codebase) ───────────────────────
+services:
+  - euler-api-gateway
+  - euler-api-txns
+  - UCS
+  - euler-db
+  - euler-api-order
+  - graphh
+  - euler-api-pre-txn
+  - euler-api-customer
+  - basilisk-v3
+  - euler-drainer
+  - token_issuer_portal_backend
+  - haskell-sequelize
+
+# ── Keyword allowlist (short terms that matter in your domain) ────────────────
+kw_allowlist:
+  - upi
+  - pix
+  - emi
+  - ucs
+  - cvv
+  - pan
+  - otp
+  - kyc
+  - bnpl
+  - nfc
+  - qr
+
+# ── Persona overrides (optional — defaults work for Juspay) ──────────────────
+# Uncomment and edit to customize for your codebase:
+#
+# personas:
+#   domain_expert:
+#     label: "🏛️ Domain Expert"
+#     system_prompt: |
+#       You are a senior engineer embedded in the <YOUR_COMPANY> platform.
+#       Your codebase has these services: <LIST>.
+#       ...
+#     framework: |
+#       Answer directly. Trace flows end-to-end...
