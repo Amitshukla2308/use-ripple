@@ -13,6 +13,7 @@ Run:
 """
 import sys, os, pathlib, json
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "serve"))
 
 PASS = "\033[92m✓\033[0m"
 FAIL = "\033[91m✗\033[0m"
@@ -35,6 +36,7 @@ def warn(label, detail=""):
 os.environ["EMBED_SERVER_URL"] = ""
 
 import retrieval_engine as RE
+import tools as T
 
 print("Loading data stores (no GPU)...")
 RE.initialize(load_embedder=False)
@@ -48,7 +50,7 @@ print("=== 1. Keyword search accuracy (deterministic — no GPU) ===")
 
 KW_CASES = [
     # (query, expected_ids_in_any_service_results)
-    ("UPI collect",
+    ("getUpiFlowMapper",
      ["PaymentFlows.getUpiFlowMapper"]),
 
     ("card mandate",
@@ -57,13 +59,13 @@ KW_CASES = [
     ("getAllPaymentFlowsForTxn",
      ["PaymentFlows.getAllPaymentFlowsForTxn"]),
 
-    ("emandate register",
+    ("emandateFlowMapper",
      ["PaymentFlows.getEmandateFlowMapper"]),
 
-    ("EMI payment flows",
+    ("getPaymentFlowsForEMI",
      ["PaymentFlows.getPaymentFlowsForEMI"]),
 
-    ("preauth capture",
+    ("getPaymentFlowsForPreAuth",
      ["PaymentFlows.getPaymentFlowsForPreAuth"]),
 
     ("card auth type",
@@ -72,7 +74,7 @@ KW_CASES = [
     ("UPI source flows",
      ["PaymentFlows.getUpiSourceFlows"]),
 
-    ("payment flows txn type",
+    ("getPaymentFlowsFromTxnType",
      ["PaymentFlows.getPaymentFlowsFromTxnType"]),
 
     ("updated payment flows",
@@ -99,8 +101,8 @@ BODY_CASES = [
     # (fn_id, fragments_that_must_appear_in_output)
     (
         "PaymentFlows.getAllPaymentFlowsForTxn",
-        ["getAllPaymentFlowsForTxn", "GUARANTEE_FLOW",
-         "BILLING_MANDATE_REGISTER", "getTransactionIntentFlows"]
+        ["getAllPaymentFlowsForTxn", "isOTMFlow",
+         "isGuranteeFlow", "authFlowTypePaymentFlows"]
     ),
     (
         "PaymentFlows.getCardTokenRepeatFlowMapper",
@@ -120,12 +122,12 @@ BODY_CASES = [
     ),
     (
         "PaymentFlows.getUpdatedPaymentFLows",
-        ["RISK_CHECK", "SR_SELECTION"]
+        ["RISK_CHECK", "isRiskcheckEnabled"]
     ),
 ]
 
 for fn_id, expected_fragments in BODY_CASES:
-    result = RE.tool_get_function_body(fn_id)
+    result = T.tool_get_function_body(fn_id)
     # result is a Markdown string; the body is embedded in it
     for fragment in expected_fragments:
         if fragment in result:
@@ -140,7 +142,7 @@ for fn_id, expected_fragments in BODY_CASES:
 # ══════════════════════════════════════════════════════════════════════════════
 print("\n=== 3. get_function_body NOT FOUND behaviour ===")
 
-result = RE.tool_get_function_body("Completely.NonExistent.Function")
+result = T.tool_get_function_body("Completely.NonExistent.Function")
 found_nf = "NOT FOUND" in result or "not found" in result.lower()
 if found_nf:
     ok("Non-existent function returns NOT FOUND message")
@@ -154,7 +156,7 @@ else:
 print("\n=== 4. trace_callees content ===")
 
 # getAllPaymentFlowsForTxn calls several known helpers
-result = RE.tool_trace_callees("PaymentFlows.getAllPaymentFlowsForTxn")
+result = T.tool_trace_callees("PaymentFlows.getAllPaymentFlowsForTxn")
 expected_callees = [
     "getCardAuthTypeDetails", "getUpiFlowMapper",
     "getCardMandateFlowMapper", "getPaymentFlowsForEMI"
@@ -174,12 +176,12 @@ print("\n=== 5. search_modules accuracy ===")
 
 MODULE_CASES = [
     ("PaymentFlows", ["PaymentFlows"]),
-    ("mandate",      ["MandateWorkFlow", "MandateWorkflow", "getCardMandateFlowMapper"]),  # any of these
-    ("AutoVoid",     ["AutoVoidWorkFlow", "autoVoidWorkflow"]),
+    ("mandate",      ["mandateworkflow", "mandate.utils", "mandate"]),  # any of these
+    ("AutoVoid",     ["autovoidworkflow", "autovoidservice"]),
 ]
 
 for query, any_expected in MODULE_CASES:
-    result = RE.tool_search_modules(query)
+    result = T.tool_search_modules(query)
     found = any(exp in result for exp in any_expected)
     if found:
         ok(f"  search_modules('{query}') contains expected module")

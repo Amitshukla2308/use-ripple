@@ -9,6 +9,7 @@ Run:
 """
 import sys, json, pathlib, urllib.request, urllib.error
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "serve"))
 
 PASS = "\033[92m✓\033[0m"
 FAIL = "\033[91m✗\033[0m"
@@ -169,13 +170,12 @@ print("\n=== 3. MCP tool functions with live data ===")
 
 try:
     import mcp_server as MCP
-    import retrieval_engine as RE
+    import os, retrieval_engine as RE
 
     # Initialize data (if not already loaded)
     if RE.G is None:
-        import os
-        os.environ["EMBED_SERVER_URL"] = "http://localhost:8001"
-        RE.initialize(load_embedder=False)
+        artifact_dir = os.environ.get("ARTIFACT_DIR", "")
+        RE.initialize(artifact_dir=artifact_dir or None, load_embedder=False)
 
     # 3a: search_symbols returns a non-empty string for known term
     result = MCP.search_symbols("getAllPaymentFlowsForTxn")
@@ -187,10 +187,10 @@ try:
 
     # 3b: get_function_body returns correct content
     result = MCP.get_function_body("PaymentFlows.getAllPaymentFlowsForTxn")
-    if "GUARANTEE_FLOW" in result and "BILLING_MANDATE_REGISTER" in result:
-        ok("get_function_body: contains lines 101-114 content")
+    if "isOTMFlow" in result and "isGuranteeFlow" in result:
+        ok("get_function_body: contains function body content")
     else:
-        fail("get_function_body must contain lines 101-114 content",
+        fail("get_function_body must contain function body content",
              f"Result: {result[:300]!r}")
 
     # 3c: trace_callees returns string (not None/error)
