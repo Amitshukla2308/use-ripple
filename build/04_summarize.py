@@ -101,26 +101,72 @@ def extract_json(text):
 
 # ── Stratified sampling ───────────────────────────────────────────────────────
 
+# Modules that are pure boilerplate — deprioritize in sampling
+_BOILERPLATE_RE = re.compile(
+    r'(?:^|\.)(?:Lenses|Lens|Constants|Shims|Generated|TH|TemplateHaskell|'
+    r'AutoDerived|Instances|Orphans)(?:\.|$)', re.I
+)
+# Business-logic modules — sample these first and more densely
+_BUSINESS_RE = re.compile(
+    r'(?:Product|OLTP|Flow|Handler|Service|Transaction|Workflow|Worker|'
+    r'Router|Decider|Controller|Manager|Orchestrat|Process|Execute|Mandate|'
+    r'Payment|Order|Refund|Settlement|Retry|Routing)', re.I
+)
+
+
 def stratified_sample(nodes, n, cluster_id=0):
     """
-    Sample up to n nodes spread evenly across modules.
-    Uses a per-cluster seed so different clusters get different orderings.
+    Adaptive, priority-weighted stratified sampling:
+    - Sample size scales with cluster complexity: min(300, max(n, n_modules // 3))
+    - Business-logic modules (Product, OLTP, Flow, Handler…) sampled first and 2x density
+    - Boilerplate modules (Lenses, Constants, Shims) sampled last at 1/4 density
+    - Per-cluster seed for reproducibility
     """
     if len(nodes) <= n:
         return nodes
-    by_module = defaultdict(list)
+
+    by_module: dict = defaultdict(list)
     for node in nodes:
         by_module[node.get("module", "unknown")].append(node)
-    modules = list(by_module.keys())
-    # Per-cluster seed prevents every cluster from seeing the same module ordering
-    random.seed(42 + hash(str(cluster_id)) % 10000)
-    random.shuffle(modules)
-    sampled, per_module = [], max(1, n // len(modules))
-    for mod in modules:
-        sampled.extend(by_module[mod][:per_module])
-        if len(sampled) >= n:
+
+    # Adaptive sample size — scale with number of unique modules
+    n_mods = len(by_module)
+    adaptive_n = min(300, max(n, n_mods // 3))
+
+    # Classify modules
+    priority_mods, normal_mods, boilerplate_mods = [], [], []
+    for mod in by_module:
+        if _BOILERPLATE_RE.search(mod):
+            boilerplate_mods.append(mod)
+        elif _BUSINESS_RE.search(mod):
+            priority_mods.append(mod)
+        else:
+            normal_mods.append(mod)
+
+    rng = random.Random(42 + hash(str(cluster_id)) % 10000)
+    rng.shuffle(priority_mods)
+    rng.shuffle(normal_mods)
+    rng.shuffle(boilerplate_mods)
+
+    # Budget: priority gets 2x density, boilerplate gets 1/4x
+    non_boiler = len(priority_mods) + len(normal_mods)
+    per_normal   = max(1, adaptive_n // max(1, non_boiler))
+    per_priority = min(5, per_normal * 2)
+    per_boiler   = max(1, per_normal // 4)
+
+    sampled: list = []
+    for mod in priority_mods + normal_mods + boilerplate_mods:
+        if _BOILERPLATE_RE.search(mod):
+            per = per_boiler
+        elif _BUSINESS_RE.search(mod):
+            per = per_priority
+        else:
+            per = per_normal
+        sampled.extend(by_module[mod][:per])
+        if len(sampled) >= adaptive_n:
             break
-    return sampled[:n]
+
+    return sampled[:adaptive_n]
 
 
 # ── Prompt building ───────────────────────────────────────────────────────────
