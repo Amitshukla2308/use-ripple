@@ -97,7 +97,7 @@ clean_stage() {
 
 echo ""
 echo " Cleaning stale data for stages that will run..."
-for stage in 1 2 3 4 5 7 8; do
+for stage in 1 2 3 4 5 8 7; do
   clean_stage "$stage"
 done
 echo " Clean complete."
@@ -109,8 +109,9 @@ run_stage 3 "GPU embedding → LanceDB"            03_embed.py
 run_stage 4 "Cluster summarisation (Kimi)"       04_summarize.py
 run_stage 5 "Package artifacts"                  05_package.py
 # Stage 6 (co-change) intentionally skipped — already built, takes hours
-run_stage 7 "Chunk docs → LanceDB"               07_chunk_docs.py
+# Stage 8 runs before 7: generates docs/generated/ which stage 7 then embeds
 run_stage 8 "Auto-generate architecture docs"    08_generate_arch_docs.py
+run_stage 7 "Chunk docs → LanceDB"               07_chunk_docs.py
 
 echo ""
 echo "══════════════════════════════════════════════"

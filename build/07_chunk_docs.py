@@ -226,7 +226,10 @@ def load_public_docs() -> list[dict]:
 
 # ── Embedding ─────────────────────────────────────────────────────────────────
 
-def embed_chunks(chunks: list[dict], model) -> np.ndarray:
+def embed_chunks(chunks: list[dict]) -> np.ndarray:
+    """Embed chunks via the shared embed_server HTTP API (POST /embed)."""
+    import urllib.request
+    server_url = os.environ.get("EMBED_SERVER_URL", "http://localhost:8001")
     texts = [
         f"passage: {c['section_title']}\n{c['text'][:1500]}"
         for c in chunks
@@ -234,7 +237,15 @@ def embed_chunks(chunks: list[dict], model) -> np.ndarray:
     all_vecs = []
     for i in range(0, len(texts), BATCH_SIZE):
         batch = texts[i:i+BATCH_SIZE]
-        vecs  = model.encode(batch, normalize_embeddings=True, batch_size=BATCH_SIZE)
+        payload = json.dumps({"texts": batch}).encode()
+        req = urllib.request.Request(
+            f"{server_url}/embed",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read())
+        vecs = np.array(result["embeddings"], dtype="float32")
         all_vecs.append(vecs)
         print(f"  Embedded {min(i+BATCH_SIZE, len(texts))}/{len(texts)}", end="\r")
     print()
@@ -323,25 +334,19 @@ def main():
 
     print(f"\nTotal chunks: {len(all_chunks)}")
 
+    if not all_chunks:
+        print("No chunks found — nothing to embed. Add .md files to WORKSPACE_DIR/docs/ and re-run.")
+        sys.exit(0)
+
     # Save raw chunks
     OUT_CHUNKS.write_text(json.dumps(all_chunks, indent=2))
     print(f"doc_chunks.json: {len(all_chunks)} chunks")
 
-    # Embed
-    print("\nLoading embedding model...")
-    from sentence_transformers import SentenceTransformer
-    model_path = pathlib.Path(os.environ.get(
-        "EMBED_MODEL",
-        str(WORKSPACE_DIR / "models" / "qwen3-embed-8b")
-    ))
-    if not model_path.exists():
-        # Fallback to HF hub name
-        model_path = "Qwen/Qwen3-Embedding-8B"
-    model = SentenceTransformer(str(model_path), device="cuda", trust_remote_code=True)
-    print(f"Model loaded from {model_path}")
-
+    # Embed via shared embed_server (avoids double-loading model into GPU)
+    server_url = os.environ.get("EMBED_SERVER_URL", "http://localhost:8001")
+    print(f"\nEmbedding via embed_server at {server_url} ...")
     t0   = time.time()
-    vecs = embed_chunks(all_chunks, model)
+    vecs = embed_chunks(all_chunks)
     print(f"Embedding done in {time.time()-t0:.1f}s")
 
     # Write LanceDB
