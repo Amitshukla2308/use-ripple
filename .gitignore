@@ -29,4 +29,8 @@ git_history_split/
 # Claude Code context file — local only, never commit
 CLAUDE.md
 
+# Org-specific serve files (contain service names/system prompts — local only)
+serve/demo_server_v6.py
+tools.py
+
 *.bak
