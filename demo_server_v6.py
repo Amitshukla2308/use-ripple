@@ -21,7 +21,7 @@ LLM_API_KEY    = os.environ.get("KIMI_API_KEY",  "REDACTED")
 LLM_BASE_URL   = os.environ.get("KIMI_BASE_URL", "https://grid.ai.juspay.net")
 LLM_MODEL      = os.environ.get("KIMI_MODEL",    "kimi-latest")
 MAX_HISTORY    = 6
-MAX_TOOL_CALLS = 20
+MAX_TOOL_CALLS = 12
 RETRIEVAL_LOG  = pathlib.Path("/tmp/retrieval_log.jsonl")
 
 llm_client       = None
@@ -214,13 +214,12 @@ async def on_message(message: cl.Message):
     history = cl.user_session.get("history", [])
 
     try:
-        # ── Build initial messages: conversation history + system + user query ─
-        messages = []
+        # ── Build initial messages: system first, then history, then user query ─
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         for past_q, past_a in history[-MAX_HISTORY:]:
             messages.append({"role": "user",      "content": past_q})
             messages.append({"role": "assistant", "content": past_a})
-        messages.append({"role": "system", "content": SYSTEM_PROMPT})
-        messages.append({"role": "user",   "content": query})
+        messages.append({"role": "user", "content": query})
 
         # ── ReAct loop: LLM reasons and calls tools until it has enough info ──
         tool_calls_count = 0

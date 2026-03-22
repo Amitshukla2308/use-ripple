@@ -549,6 +549,59 @@ AGENT_TOOLS = [
             "service":   {"type": "string", "description": "Optional: restrict to a service if the type name is ambiguous."}
         }, "required": ["type_name"]}
     }},
+    {"type": "function", "function": {
+        "name": "search_modules",
+        "description": (
+            "Search module namespaces by keyword. Returns module paths you can pass to get_module.\n\n"
+            "Use this FIRST when you don't know where code lives — it orients you within the codebase "
+            "before you start reading individual functions.\n\n"
+            "Examples: 'UPI collect', 'gateway routes', 'mandate payment', 'card tokenization'"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "query":   {"type": "string", "description": "Keyword(s) describing the module/component you are looking for."},
+            "service": {"type": "string", "description": "Optional: restrict to a specific service name."}
+        }, "required": ["query"]}
+    }},
+    {"type": "function", "function": {
+        "name": "get_module",
+        "description": (
+            "List every symbol in a module namespace. Use after search_modules to see the full surface "
+            "area before deciding what to read.\n\n"
+            "Pass the exact module path returned by search_modules (dot notation).\n"
+            "Example: get_module('Euler.API.Gateway.Gateway.UPI')"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "module_name": {"type": "string", "description": "Module namespace path in dot notation (e.g. 'PaymentFlows', 'Euler.API.Gateway.Gateway.UPI')."},
+            "service":     {"type": "string", "description": "Optional: restrict to a specific service."}
+        }, "required": ["module_name"]}
+    }},
+    {"type": "function", "function": {
+        "name": "get_blast_radius",
+        "description": (
+            "Import graph + co-change analysis for a set of changed files or modules.\n\n"
+            "Use this for impact assessment: given a file or module that changed, what else is affected?\n"
+            "Returns: direct import neighbors (who imports this?), co-change neighbors (what changed "
+            "together historically?), and affected services."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "files_or_modules": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of changed file paths or module names (dot notation)."
+            }
+        }, "required": ["files_or_modules"]}
+    }},
+    {"type": "function", "function": {
+        "name": "get_context",
+        "description": (
+            "Last resort — returns a large pre-built context block (~5k-18k tokens) covering the query.\n\n"
+            "Only use if search_symbols + get_function_body have failed to find what you need. "
+            "Never call twice in one session — it is expensive."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "The original user question."}
+        }, "required": ["query"]}
+    }},
 ]
 
 
@@ -1552,6 +1605,19 @@ def tool_get_type_definition(type_name: str, service: str = "") -> str:
     return "\n".join(lines)
 
 
+def tool_get_context(query: str) -> str:
+    """Last-resort: build full cross-service context for a query (expensive, ~5k-18k tokens)."""
+    if G is None:
+        return "Graph not loaded."
+    vec_by_svc  = stratified_vector_search(query)
+    kw_by_svc   = cross_service_keyword_search(query)
+    cluster_by_svc = get_cluster_context_for_services(
+        list(set(list(vec_by_svc) + list(kw_by_svc)))
+    )
+    doc_hits = doc_vector_search(query, k=3) if doc_lance_tbl is not None else []
+    return _build_base_context(vec_by_svc, kw_by_svc, cluster_by_svc, "juspay_code", doc_hits)
+
+
 TOOL_DISPATCH: dict = {
     "get_function_body":     lambda a: tool_get_function_body(a.get("fn_id",""), a.get("reason","")),
     "trace_callees":         lambda a: tool_trace_callees(a.get("fn_id",""), a.get("reason","")),
@@ -1560,6 +1626,8 @@ TOOL_DISPATCH: dict = {
     "search_symbols":        lambda a: tool_search_symbols(a.get("query",""), a.get("service",""), a.get("brief", False)),
     "search_modules":        lambda a: tool_search_modules(a.get("query",""), a.get("service","")),
     "get_module":            lambda a: tool_get_module(a.get("module_name",""), a.get("service",""), a.get("max_symbols", 30)),
+    "get_blast_radius":      lambda a: str(get_blast_radius(a.get("files_or_modules", []))),
+    "get_context":           lambda a: tool_get_context(a.get("query","")),
     "search_docs":           lambda a: tool_search_docs(a.get("query",""), a.get("tags",[])),
     "get_gateway_integrity": lambda a: tool_get_gateway_integrity(a.get("gateway_name","")),
     "get_type_definition":   lambda a: tool_get_type_definition(a.get("type_name",""), a.get("service","")),
