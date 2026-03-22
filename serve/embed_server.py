@@ -9,12 +9,16 @@ PROVIDERS
   local   (default) — Qwen3-Embedding-8B loaded on GPU/CPU
   openai            — OpenAI text-embedding-3-large (3072d) or -small (1536d)
   cohere            — Cohere embed-english-v3.0 (1024d)
-  voyage            — Voyage voyage-code-3 (1024d) — best for code
+  voyage            — Voyage voyage-code-3 (1024d)
   jina              — Jina jina-embeddings-v3 (1024d)
   ollama            — any Ollama model, e.g. nomic-embed-text (768d)
 
 IMPORTANT: embedding dimension depends on the provider/model.
   If you change providers you must re-run build/03_embed.py to rebuild vectors.lance.
+
+Tested with: local (Qwen3-Embedding-8B), openai (text-embedding-3-large), voyage (voyage-code-3)
+Any provider that produces consistent float vectors will work — check your provider's docs
+for the best model to use with code search workloads.
 
 STARTUP (choose one):
 
@@ -24,7 +28,7 @@ STARTUP (choose one):
   # OpenAI:
   EMBED_PROVIDER=openai OPENAI_API_KEY=sk-... python3 embed_server.py
 
-  # Voyage (recommended for code, no GPU needed):
+  # Voyage AI:
   EMBED_PROVIDER=voyage VOYAGE_API_KEY=pa-... python3 embed_server.py
 
   # Ollama (fully local, no GPU required):

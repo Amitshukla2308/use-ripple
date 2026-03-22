@@ -9,12 +9,13 @@
 llm:
   api_key:  "${KIMI_API_KEY}"         # env var reference or literal key
   base_url: "https://grid.ai.juspay.net"
-  model:    "kimi-latest"
+  model:    "${LLM_MODEL}"          # any OpenAI-compatible model
 
-  # OpenAI example:
-  # api_key:  "${OPENAI_API_KEY}"
+  # Tested with: kimi-latest (via grid.ai.juspay.net), any OpenAI-compatible endpoint
+  # Use the most capable model you have access to — answer quality scales with LLM quality.
+  # Example:
   # base_url: "https://api.openai.com/v1"
-  # model:    "gpt-4o"
+  # model:    "${LLM_MODEL}"
 
 # ── Embedding ─────────────────────────────────────────────────────────────────
 # All servers connect to the embed_server via server_url — never load models directly.
@@ -27,16 +28,19 @@ embed:
   # IMPORTANT: embedding dimension varies by provider.
   # If you change provider, you must re-run build/03_embed.py to rebuild vectors.lance.
   #
-  # Provider      Model                       Dim   GPU needed   Cost
-  # ------------- --------------------------- ----- ------------ ------
-  # local         qwen3-embed-8b              4096  Yes (~6GB)   Free
-  # openai        text-embedding-3-large      3072  No           Paid
-  # openai        text-embedding-3-small      1536  No           Paid (cheaper)
-  # cohere        embed-english-v3.0          1024  No           Paid
-  # voyage        voyage-code-3               1024  No           Paid (best for code)
-  # jina          jina-embeddings-v3          1024  No           Paid
-  # ollama        nomic-embed-text             768  No           Free (local CPU)
-  # ollama        mxbai-embed-large           1024  No           Free (local CPU)
+  # Provider   Default model               Dim   GPU needed
+  # ---------- --------------------------- ----- ----------
+  # local       qwen3-embed-8b              4096  Yes (~6GB)
+  # openai      (see provider docs)         varies  No
+  # cohere      (see provider docs)         varies  No
+  # voyage      voyage-code-3               1024  No
+  # jina        jina-embeddings-v3          1024  No
+  # ollama      nomic-embed-text             768  No (local CPU)
+  # ollama      mxbai-embed-large           1024  No (local CPU)
+  #
+  # Tested with: local/qwen3-embed-8b, openai/text-embedding-3-large, voyage/voyage-code-3
+  # For best results with code search, use a model trained on or fine-tuned for code.
+  # If you have access to a higher-dimension model, prefer it — retrieval quality scales with dim.
   #
   provider: "local"                     # set EMBED_PROVIDER env var to this value
   model: ""                             # set EMBED_PROVIDER_MODEL to override default

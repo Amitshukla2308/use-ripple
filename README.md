@@ -205,6 +205,47 @@ python3 mcp_server.py
 
 ---
 
+
+## Embedding providers
+
+`embed_server.py` abstracts the embedding model behind a local HTTP server. Switch providers
+by setting env vars — nothing else in the stack changes.
+
+```bash
+# Local GPU (default — requires ~6GB VRAM)
+EMBED_MODEL=/path/to/model python3 serve/embed_server.py
+
+# Any cloud provider (no GPU needed)
+EMBED_PROVIDER=openai  OPENAI_API_KEY=...  python3 serve/embed_server.py
+EMBED_PROVIDER=cohere  COHERE_API_KEY=...  python3 serve/embed_server.py
+EMBED_PROVIDER=voyage  VOYAGE_API_KEY=...  python3 serve/embed_server.py
+EMBED_PROVIDER=jina    JINA_API_KEY=...    python3 serve/embed_server.py
+
+# Fully local, no GPU (requires Ollama running)
+EMBED_PROVIDER=ollama  EMBED_PROVIDER_MODEL=nomic-embed-text  python3 serve/embed_server.py
+```
+
+| Provider | Default model | Dim | GPU needed |
+|----------|--------------|-----|------------|
+| local | qwen3-embed-8b | 4096 | Yes (~6GB) |
+| openai | see provider docs | varies | No |
+| cohere | see provider docs | varies | No |
+| voyage | voyage-code-3 | 1024 | No |
+| jina | jina-embeddings-v3 | 1024 | No |
+| ollama | nomic-embed-text | 768 | No (local CPU) |
+
+**Tested with:** local/qwen3-embed-8b, openai/text-embedding-3-large, voyage/voyage-code-3.
+
+**Guidance:** retrieval quality scales with embedding dimension and with how well the model
+handles mixed code + natural language. If you have access to a higher-capability model from
+your provider, prefer it over the defaults listed here. Check your provider's documentation
+for models optimised for code or technical text retrieval.
+
+> **Important:** embedding dimension is fixed at index-build time. If you switch providers
+> after running stage 3, you must re-run `build/03_embed.py` to rebuild `vectors.lance`.
+
+---
+
 ## Connecting AI agents via MCP
 
 Add to `.mcp.json` in your project root (or `~/.claude/mcp.json` globally):
