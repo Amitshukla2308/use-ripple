@@ -130,200 +130,6 @@ models/
 
 ---
 
-## Setup from scratch
-
-### Prerequisites
-
-```bash
-python3 --version   # 3.11+
-
-pip install chainlit openai lancedb sentence-transformers networkx \
-            pyarrow leidenalg igraph rank-bm25 mcp ijson pyyaml \
-            tree-sitter tree-sitter-haskell tree-sitter-rust tree-sitter-groovy
-
-# GPU needed only for local embedding (stage 3 + embed_server with EMBED_PROVIDER=local)
-# Cloud providers (openai, voyage, cohere, etc.) require no GPU — see Embedding providers
-nvidia-smi
-```
-
-### Step 1 — Prepare your workspace
-
-```bash
-mkdir -p ~/projects/workspaces/YOUR_ORG/{source,artifacts,output}
-
-# One subdirectory per service
-cp -r /path/to/service-a ~/projects/workspaces/YOUR_ORG/source/
-cp -r /path/to/service-b ~/projects/workspaces/YOUR_ORG/source/
-
-cp ~/projects/hyperretrieval/config.example.yaml \
-   ~/projects/workspaces/YOUR_ORG/config.yaml
-# Edit: set LLM endpoint, API keys, ports
-```
-
-### Step 2 — Export git history
-
-```bash
-# Run for each service repo, append to a single file
-git -C ~/projects/workspaces/YOUR_ORG/source/service-a \
-    log --all --name-only --format="COMMIT|%H|%s|%ae|%ai" \
-    >> ~/projects/workspaces/YOUR_ORG/git_history.json
-```
-
-### Step 3 — Choose an embedding provider
-
-See [Embedding providers](#embedding-providers) below. If using a cloud provider, skip the model download. If using local:
-
-```bash
-mkdir -p ~/projects/models
-python3 -c "
-from sentence_transformers import SentenceTransformer
-m = SentenceTransformer('Qwen/Qwen3-Embedding-8B')
-m.save('/path/to/models/qwen3-embed-8b')
-"
-```
-
-### Step 4 — Run the build pipeline
-
-```bash
-cd ~/projects/hyperretrieval
-
-export REPO_ROOT=~/projects/workspaces/YOUR_ORG/source
-export OUTPUT_DIR=~/projects/workspaces/YOUR_ORG/output
-export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
-export EMBED_MODEL=/path/to/models/your-embed-model  # or set EMBED_PROVIDER + API key
-export LLM_API_KEY=your_llm_api_key
-export LLM_BASE_URL=https://your-llm-endpoint
-export LLM_MODEL=your-model-name
-
-bash build/run_pipeline.sh   # 30 min – 2 h depending on codebase size
-
-# Resume from a specific stage (stages before N are skipped, outputs preserved)
-bash build/run_pipeline.sh --from-stage 4
-
-# Run a single stage only
-bash build/run_pipeline.sh --only-stage 7
-
-# Or stage by stage:
-python3 build/01_extract.py        # 5–15 min for 100k symbols (parallel across services)
-python3 build/02_build_graph.py    # ~2 min (Leiden clustering)
-python3 build/03_embed.py          # 20–60 min (GPU-heavy, or fast with cloud provider)
-python3 build/04_summarize.py      # ~30 min (LLM API, crash-safe/resumable)
-python3 build/05_package.py        # ~1 min
-python3 build/06_build_cochange.py # 10–30 min (streaming, safe on large history)
-python3 build/07_chunk_docs.py     # ~5 min
-python3 build/08_generate_arch_docs.py  # 10–30 min (LLM, resumable)
-```
-
-### Step 5 — Start the servers
-
-**Always start the embedding server first.** Only one process should load the embedding model at a time.
-
-```bash
-# 1. Embedding server
-export EMBED_MODEL=/path/to/model   # or EMBED_PROVIDER + API key
-cd ~/projects/hyperretrieval/serve
-python3 embed_server.py
-# Wait for: [embed_server] Ready on 127.0.0.1:8001
-
-# 2. Chat UI  (demo_server_v6.py is org-specific — gitignored, copy from template)
-export EMBED_SERVER_URL=http://localhost:8001
-export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
-cd ~/projects/hyperretrieval/serve
-chainlit run demo_server_v6.py --port 8000
-# Open http://localhost:8000
-
-# 3. MCP server (optional — for AI coding assistant integration)
-export EMBED_SERVER_URL=http://localhost:8001
-export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
-cd ~/projects/hyperretrieval
-python3 serve/mcp_server.py
-# SSE endpoint: http://localhost:8002/sse
-```
-
----
-
-## Embedding providers
-
-`embed_server.py` provides a unified HTTP interface regardless of where embeddings come from. Switch providers with a single env var — nothing else changes.
-
-```bash
-# Local GPU
-EMBED_MODEL=/path/to/model python3 serve/embed_server.py
-
-# Cloud providers (no GPU needed)
-EMBED_PROVIDER=openai  OPENAI_API_KEY=...  python3 serve/embed_server.py
-EMBED_PROVIDER=cohere  COHERE_API_KEY=...  python3 serve/embed_server.py
-EMBED_PROVIDER=voyage  VOYAGE_API_KEY=...  python3 serve/embed_server.py
-EMBED_PROVIDER=jina    JINA_API_KEY=...    python3 serve/embed_server.py
-
-# Fully local, no GPU (requires Ollama running)
-EMBED_PROVIDER=ollama  EMBED_PROVIDER_MODEL=nomic-embed-text  python3 serve/embed_server.py
-```
-
-| Provider | Default model | Dim | GPU needed |
-|----------|--------------|-----|------------|
-| local | qwen3-embed-8b | 4096 | Yes (~6GB) |
-| openai | see provider docs | varies | No |
-| cohere | see provider docs | varies | No |
-| voyage | voyage-code-3 | 1024 | No |
-| jina | jina-embeddings-v3 | 1024 | No |
-| ollama | nomic-embed-text | 768 | No (local CPU) |
-
-**Tested with:** local/qwen3-embed-8b, openai/text-embedding-3-large, voyage/voyage-code-3.
-
-**Guidance:** retrieval quality scales with embedding dimension. Use the highest-dimension model available to you, and prefer models evaluated on code or technical text retrieval. Check your provider's documentation for their recommended model for this workload.
-
-> **Important:** embedding dimension is fixed when you run stage 3. Switching providers later requires rebuilding `vectors.lance` by re-running `build/03_embed.py`.
-
----
-
-## Connecting AI agents via MCP
-
-Add to `.mcp.json` in your project root:
-
-```json
-{
-  "mcpServers": {
-    "codebase": {
-      "type": "sse",
-      "url": "http://127.0.0.1:8002/sse"
-    }
-  }
-}
-```
-
-Works with Claude Code, Cursor, and Windsurf.
-
-### The 8 MCP tools
-
-| Tool | Use when |
-|------|----------|
-| `search_modules` | **Start here.** Find which namespace contains relevant code. |
-| `get_module` | List all symbols in a namespace. |
-| `search_symbols` | Semantic search — you know what a function does, not its name. |
-| `get_function_body` | Read source of a function by its fully-qualified ID. |
-| `trace_callers` | Who calls this function? (upstream impact) |
-| `trace_callees` | What does this function call? (downstream dependencies) |
-| `get_blast_radius` | Import graph + co-change impact for changed files or modules. |
-| `get_context` | **Last resort.** Pre-built context block (large). Use only if targeted searches failed. |
-
-**Optimal chain:** `search_modules → get_module → get_function_body → trace_callees`
-
-**Retrieval:** `search_symbols` uses BM25 + dense vector **RRF fusion** (`unified_search`). Results are ranked by Reciprocal Rank Fusion across both signals — keyword hits for exact identifiers, vector search for semantic similarity. Co-change data is added as a structural coupling signal on top.
-
----
-
-## PR blast-radius analysis
-
-```bash
-git diff main...HEAD --name-only | python3 serve/pr_analyzer.py
-python3 serve/pr_analyzer.py --files src/Routes.hs src/Gateway.hs
-git diff main...HEAD --name-only | python3 serve/pr_analyzer.py --format json
-git diff main...HEAD --name-only | python3 serve/pr_analyzer.py --check security
-```
-
----
-
 ## Applications you can build
 
 The Chat UI and MCP server are two reference implementations. The retrieval engine is a general-purpose data layer — any application that benefits from understanding a codebase can be built on top of it.
@@ -528,6 +334,200 @@ def parse_javascript_file(path: pathlib.Path, service: str) \
 ```
 
 Then add the file glob and parser call inside the service loop in `main()`.
+
+---
+
+## Setup from scratch
+
+### Prerequisites
+
+```bash
+python3 --version   # 3.11+
+
+pip install chainlit openai lancedb sentence-transformers networkx \
+            pyarrow leidenalg igraph rank-bm25 mcp ijson pyyaml \
+            tree-sitter tree-sitter-haskell tree-sitter-rust tree-sitter-groovy
+
+# GPU needed only for local embedding (stage 3 + embed_server with EMBED_PROVIDER=local)
+# Cloud providers (openai, voyage, cohere, etc.) require no GPU — see Embedding providers
+nvidia-smi
+```
+
+### Step 1 — Prepare your workspace
+
+```bash
+mkdir -p ~/projects/workspaces/YOUR_ORG/{source,artifacts,output}
+
+# One subdirectory per service
+cp -r /path/to/service-a ~/projects/workspaces/YOUR_ORG/source/
+cp -r /path/to/service-b ~/projects/workspaces/YOUR_ORG/source/
+
+cp ~/projects/hyperretrieval/config.example.yaml \
+   ~/projects/workspaces/YOUR_ORG/config.yaml
+# Edit: set LLM endpoint, API keys, ports
+```
+
+### Step 2 — Export git history
+
+```bash
+# Run for each service repo, append to a single file
+git -C ~/projects/workspaces/YOUR_ORG/source/service-a \
+    log --all --name-only --format="COMMIT|%H|%s|%ae|%ai" \
+    >> ~/projects/workspaces/YOUR_ORG/git_history.json
+```
+
+### Step 3 — Choose an embedding provider
+
+See [Embedding providers](#embedding-providers) below. If using a cloud provider, skip the model download. If using local:
+
+```bash
+mkdir -p ~/projects/models
+python3 -c "
+from sentence_transformers import SentenceTransformer
+m = SentenceTransformer('Qwen/Qwen3-Embedding-8B')
+m.save('/path/to/models/qwen3-embed-8b')
+"
+```
+
+### Step 4 — Run the build pipeline
+
+```bash
+cd ~/projects/hyperretrieval
+
+export REPO_ROOT=~/projects/workspaces/YOUR_ORG/source
+export OUTPUT_DIR=~/projects/workspaces/YOUR_ORG/output
+export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
+export EMBED_MODEL=/path/to/models/your-embed-model  # or set EMBED_PROVIDER + API key
+export LLM_API_KEY=your_llm_api_key
+export LLM_BASE_URL=https://your-llm-endpoint
+export LLM_MODEL=your-model-name
+
+bash build/run_pipeline.sh   # 30 min – 2 h depending on codebase size
+
+# Resume from a specific stage (stages before N are skipped, outputs preserved)
+bash build/run_pipeline.sh --from-stage 4
+
+# Run a single stage only
+bash build/run_pipeline.sh --only-stage 7
+
+# Or stage by stage:
+python3 build/01_extract.py        # 5–15 min for 100k symbols (parallel across services)
+python3 build/02_build_graph.py    # ~2 min (Leiden clustering)
+python3 build/03_embed.py          # 20–60 min (GPU-heavy, or fast with cloud provider)
+python3 build/04_summarize.py      # ~30 min (LLM API, crash-safe/resumable)
+python3 build/05_package.py        # ~1 min
+python3 build/06_build_cochange.py # 10–30 min (streaming, safe on large history)
+python3 build/07_chunk_docs.py     # ~5 min
+python3 build/08_generate_arch_docs.py  # 10–30 min (LLM, resumable)
+```
+
+### Step 5 — Start the servers
+
+**Always start the embedding server first.** Only one process should load the embedding model at a time.
+
+```bash
+# 1. Embedding server
+export EMBED_MODEL=/path/to/model   # or EMBED_PROVIDER + API key
+cd ~/projects/hyperretrieval/serve
+python3 embed_server.py
+# Wait for: [embed_server] Ready on 127.0.0.1:8001
+
+# 2. Chat UI  (demo_server_v6.py is org-specific — gitignored, copy from template)
+export EMBED_SERVER_URL=http://localhost:8001
+export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
+cd ~/projects/hyperretrieval/serve
+chainlit run demo_server_v6.py --port 8000
+# Open http://localhost:8000
+
+# 3. MCP server (optional — for AI coding assistant integration)
+export EMBED_SERVER_URL=http://localhost:8001
+export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
+cd ~/projects/hyperretrieval
+python3 serve/mcp_server.py
+# SSE endpoint: http://localhost:8002/sse
+```
+
+---
+
+## Embedding providers
+
+`embed_server.py` provides a unified HTTP interface regardless of where embeddings come from. Switch providers with a single env var — nothing else changes.
+
+```bash
+# Local GPU
+EMBED_MODEL=/path/to/model python3 serve/embed_server.py
+
+# Cloud providers (no GPU needed)
+EMBED_PROVIDER=openai  OPENAI_API_KEY=...  python3 serve/embed_server.py
+EMBED_PROVIDER=cohere  COHERE_API_KEY=...  python3 serve/embed_server.py
+EMBED_PROVIDER=voyage  VOYAGE_API_KEY=...  python3 serve/embed_server.py
+EMBED_PROVIDER=jina    JINA_API_KEY=...    python3 serve/embed_server.py
+
+# Fully local, no GPU (requires Ollama running)
+EMBED_PROVIDER=ollama  EMBED_PROVIDER_MODEL=nomic-embed-text  python3 serve/embed_server.py
+```
+
+| Provider | Default model | Dim | GPU needed |
+|----------|--------------|-----|------------|
+| local | qwen3-embed-8b | 4096 | Yes (~6GB) |
+| openai | see provider docs | varies | No |
+| cohere | see provider docs | varies | No |
+| voyage | voyage-code-3 | 1024 | No |
+| jina | jina-embeddings-v3 | 1024 | No |
+| ollama | nomic-embed-text | 768 | No (local CPU) |
+
+**Tested with:** local/qwen3-embed-8b, openai/text-embedding-3-large, voyage/voyage-code-3.
+
+**Guidance:** retrieval quality scales with embedding dimension. Use the highest-dimension model available to you, and prefer models evaluated on code or technical text retrieval. Check your provider's documentation for their recommended model for this workload.
+
+> **Important:** embedding dimension is fixed when you run stage 3. Switching providers later requires rebuilding `vectors.lance` by re-running `build/03_embed.py`.
+
+---
+
+## Connecting AI agents via MCP
+
+Add to `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "codebase": {
+      "type": "sse",
+      "url": "http://127.0.0.1:8002/sse"
+    }
+  }
+}
+```
+
+Works with Claude Code, Cursor, and Windsurf.
+
+### The 8 MCP tools
+
+| Tool | Use when |
+|------|----------|
+| `search_modules` | **Start here.** Find which namespace contains relevant code. |
+| `get_module` | List all symbols in a namespace. |
+| `search_symbols` | Semantic search — you know what a function does, not its name. |
+| `get_function_body` | Read source of a function by its fully-qualified ID. |
+| `trace_callers` | Who calls this function? (upstream impact) |
+| `trace_callees` | What does this function call? (downstream dependencies) |
+| `get_blast_radius` | Import graph + co-change impact for changed files or modules. |
+| `get_context` | **Last resort.** Pre-built context block (large). Use only if targeted searches failed. |
+
+**Optimal chain:** `search_modules → get_module → get_function_body → trace_callees`
+
+**Retrieval:** `search_symbols` uses BM25 + dense vector **RRF fusion** (`unified_search`). Results are ranked by Reciprocal Rank Fusion across both signals — keyword hits for exact identifiers, vector search for semantic similarity. Co-change data is added as a structural coupling signal on top.
+
+---
+
+## PR blast-radius analysis
+
+```bash
+git diff main...HEAD --name-only | python3 serve/pr_analyzer.py
+python3 serve/pr_analyzer.py --files src/Routes.hs src/Gateway.hs
+git diff main...HEAD --name-only | python3 serve/pr_analyzer.py --format json
+git diff main...HEAD --name-only | python3 serve/pr_analyzer.py --check security
+```
 
 ---
 
