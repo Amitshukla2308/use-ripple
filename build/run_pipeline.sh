@@ -16,10 +16,12 @@ export CONFIG_PATH="$WORKSPACE_DIR/config.yaml"
 # ── LLM (key already in config.yaml — also readable from env) ────────────────
 export LLM_BASE_URL="https://grid.ai.juspay.net"
 export LLM_MODEL="kimi-latest"
-# LLM_API_KEY falls through from shell env (set via KIMI_API_KEY → LLM_API_KEY)
-# or is read directly from config.yaml by each stage.
-if [ -z "$LLM_API_KEY" ] && [ -n "$KIMI_API_KEY" ]; then
+# LLM_API_KEY: shell env → KIMI_API_KEY → config.yaml (in that order)
+if [ -n "$KIMI_API_KEY" ] && [ -z "$LLM_API_KEY" ]; then
   export LLM_API_KEY="$KIMI_API_KEY"
+fi
+if [ -z "$LLM_API_KEY" ] && [ -f "$CONFIG_PATH" ]; then
+  export LLM_API_KEY=$("$PY" -c "import yaml; c=yaml.safe_load(open('$CONFIG_PATH')); print(c.get('llm_api_key',''))" 2>/dev/null || echo "")
 fi
 
 # ── Embed server (GPU model running as separate process) ──────────────────────
