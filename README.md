@@ -67,14 +67,19 @@ hyperretrieval/
 │   ├── 07_chunk_docs.py       ← Chunk + embed markdown docs into docs.lance
 │   └── run_pipeline.sh        ← Run all 7 stages end-to-end
 │
-├── serve/                     ← Runtime entry points (start after the build)
-│   ├── retrieval_engine.py    ← Core library: loads all indexes, exposes tool functions
+├── serve/                     ← Proprietary engine — orgs never modify this
+│   ├── retrieval_engine.py    ← Core library: loads all indexes, graph traversal, vector search
 │   ├── embed_server.py        ← Shared embedding server (port 8001) — start FIRST
-│   ├── demo_server_v6.py      ← Chainlit chat UI (port 8000)
 │   ├── mcp_server.py          ← MCP SSE server (port 8002) — 8 tools for AI agents
-│   ├── pr_analyzer.py         ← CLI blast-radius report for changed files
 │   ├── public/                ← Chainlit CSS + theme
 │   └── .chainlit/             ← Chainlit config (name, layout, CSS path)
+│
+├── tools.py                   ← Org-customizable: AGENT_TOOLS, TOOL_DISPATCH, tool_* functions,
+│                                 persona prompts, run_agent_loop_sync. Imports retrieval_engine.
+│
+├── apps/
+│   ├── chat/demo_server_v6.py ← Chainlit chat UI (port 8000) — run from apps/chat/
+│   └── cli/pr_analyzer.py     ← CLI blast-radius report for CI/CD pipelines
 │
 ├── tools/
 │   └── generate_mindmap.py    ← Visualise the graph as an HTML mindmap
@@ -203,14 +208,15 @@ python3 embed_server.py
 # 2. Chat UI
 export EMBED_SERVER_URL=http://localhost:8001
 export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
-cd ~/projects/hyperretrieval/serve
+cd ~/projects/hyperretrieval/apps/chat
 chainlit run demo_server_v6.py --port 8000
 # Open http://localhost:8000
 
 # 3. MCP server (optional — for AI coding assistant integration)
 export EMBED_SERVER_URL=http://localhost:8001
 export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
-python3 mcp_server.py
+cd ~/projects/hyperretrieval
+python3 serve/mcp_server.py
 # SSE endpoint: http://localhost:8002/sse
 ```
 
@@ -288,10 +294,10 @@ Works with Claude Code, Cursor, and Windsurf.
 ## PR blast-radius analysis
 
 ```bash
-git diff main...HEAD --name-only | python3 serve/pr_analyzer.py
-python3 serve/pr_analyzer.py --files src/Routes.hs src/Gateway.hs
-git diff main...HEAD --name-only | python3 serve/pr_analyzer.py --format json
-git diff main...HEAD --name-only | python3 serve/pr_analyzer.py --check security
+git diff main...HEAD --name-only | python3 apps/cli/pr_analyzer.py
+python3 apps/cli/pr_analyzer.py --files src/Routes.hs src/Gateway.hs
+git diff main...HEAD --name-only | python3 apps/cli/pr_analyzer.py --format json
+git diff main...HEAD --name-only | python3 apps/cli/pr_analyzer.py --check security
 ```
 
 ---
@@ -359,6 +365,7 @@ User question
 
 ```python
 import retrieval_engine as RE
+import tools  # AGENT_TOOLS and TOOL_DISPATCH live here
 from openai import OpenAI
 
 RE.initialize("/path/to/workspaces/YOUR_ORG/artifacts")
@@ -374,7 +381,7 @@ def run_agent(question: str) -> str:
         resp = client.chat.completions.create(
             model="your-model",
             messages=messages,
-            tools=RE.AGENT_TOOLS,
+            tools=tools.AGENT_TOOLS,
             tool_choice="auto",
         )
         msg = resp.choices[0].message
@@ -388,7 +395,7 @@ def run_agent(question: str) -> str:
         for tc in msg.tool_calls:
             import json
             args   = json.loads(tc.function.arguments)
-            result = RE.TOOL_DISPATCH[tc.function.name](args)
+            result = tools.TOOL_DISPATCH[tc.function.name](args)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
     return "Investigation limit reached."
@@ -398,7 +405,7 @@ The real implementations in `demo_server_v6.py` (Chainlit) and `mcp_server.py` f
 
 ### Choosing what to expose
 
-`AGENT_TOOLS` in `retrieval_engine.py` is the full list of tools the LLM can call. `TOOL_DISPATCH` maps tool names to functions. Your agent can use all of them or a subset depending on the use case:
+`AGENT_TOOLS` in `tools.py` is the full list of tools the LLM can call. `TOOL_DISPATCH` maps tool names to functions. Your agent can use all of them or a subset depending on the use case:
 
 | Use case | Recommended tools |
 |----------|------------------|
@@ -414,19 +421,19 @@ The real implementations in `demo_server_v6.py` (Chainlit) and `mcp_server.py` f
 
 Every tool in the system has three parts. Add all three to expose a new capability.
 
-### 1. The function in `retrieval_engine.py`
+### 1. The function in `tools.py`
 
 ```python
 def tool_find_tests(fn_id: str) -> str:
     """Find test files that reference a given function ID."""
-    if not G or fn_id not in G.nodes:
+    if not RE.G or fn_id not in RE.G.nodes:
         return f"Function '{fn_id}' not found."
 
     # Your retrieval logic here — search the graph, body_store, call_graph, etc.
     results = [
-        nid for nid, d in G.nodes(data=True)
+        nid for nid, d in RE.G.nodes(data=True)
         if "test" in d.get("file", "").lower()
-        and fn_id.split(".")[-1] in body_store.get(nid, "")
+        and fn_id.split(".")[-1] in RE.body_store.get(nid, "")
     ]
     return "\n".join(results[:20]) or "No test references found."
 ```
@@ -466,7 +473,7 @@ TOOL_DISPATCH: dict = {
 
 ### 4. Expose via MCP (optional)
 
-To make the tool available in AI coding assistants, add it to `mcp_server.py`:
+To make the tool available in AI coding assistants, add it to `serve/mcp_server.py`:
 
 ```python
 @mcp.tool()
@@ -561,20 +568,20 @@ retrieval_engine.py  (imported by every entry point)
 
 Entry points (all import retrieval_engine, none duplicate logic):
 
-  demo_server_v6.py (:8000)    Chainlit chat UI
+  apps/chat/demo_server_v6.py (:8000)    Chainlit chat UI
     ReAct loop renders tool calls as expandable steps.
     Streams the final answer token by token.
 
-  mcp_server.py (:8002/sse)    MCP server
+  serve/mcp_server.py (:8002/sse)        MCP server
     Wraps TOOL_DISPATCH as MCP tools over SSE transport.
     Compatible with any MCP client.
 
-  pr_analyzer.py               CLI
+  apps/cli/pr_analyzer.py                CLI
     resolve files → blast radius → optional LLM explanation.
     Exits non-zero for CI gates.
 
   your_app.py                  Anything you build
-    Import retrieval_engine, call initialize(), use TOOL_DISPATCH.
+    Import retrieval_engine + tools, call RE.initialize(), use tools.TOOL_DISPATCH.
 ```
 
 **Why two graphs (G and MG)?**
@@ -591,7 +598,7 @@ Without stratification, nearest-neighbour search returns results biased toward t
 |---------|-------|-----|
 | `name '_encode_queries_batch' is not defined` | Function deleted by mistake | Restore it — it is called by `_encode_query` and `stratified_vector_search` |
 | Embed server reports `device=cpu` when GPU is available | GPU driver not visible to the process | Check `nvidia-smi` and CUDA driver installation; on WSL2 run `wsl --shutdown` and restart |
-| Chainlit shows default name/theme instead of custom | Wrong working directory at launch | Run chainlit from `serve/` where `.chainlit/config.toml` and `public/` live |
+| Chainlit shows default name/theme instead of custom | Wrong working directory at launch | Run chainlit from `apps/chat/` — `.chainlit/` config and `public/` must be accessible from CWD |
 | LanceDB write fails silently | Writing to a filesystem that does not support mmap | Write to a native Linux ext4 path; on WSL2 avoid `/mnt/` paths |
 | Semantic search misses obvious results | Short terms filtered by length | Add short domain terms to `_KW_ALLOWLIST` in `retrieval_engine.py` |
 | Co-change builder runs out of memory | Loading full repository objects into memory | Use `06_build_cochange.py` which streams at commit level, not repo level |
