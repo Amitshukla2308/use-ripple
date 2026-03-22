@@ -58,7 +58,7 @@ doc_chunks:   list = []
 doc_by_id:    dict = {}
 gw_integrity: dict = {}
 
-# ── Config (override via load_config() or env vars) ─────────────────────────
+# ── Retrieval tuning defaults (override via config.yaml) ────────────────────
 KNOWN_SERVICES: list = [
     "euler-api-gateway", "euler-api-txns", "UCS", "euler-db",
     "euler-api-order", "graphh", "euler-api-pre-txn",
