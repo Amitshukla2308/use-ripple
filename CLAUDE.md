@@ -8,7 +8,7 @@
 
 HyperRetrieval is a self-hosted codebase intelligence platform. It indexes a large multi-service codebase into several data structures (graph, vector index, co-change index, body store, call graph) and exposes them via:
 - A **Chainlit chat UI** (port 8000) — ReAct agent loop with tool calling
-- An **MCP SSE server** (port 8002) — 7 tools for Claude Code / Cursor / Windsurf
+- An **MCP SSE server** (port 8002) — 8 tools for Claude Code / Cursor / Windsurf
 - A **CLI pr_analyzer** — blast-radius report for changed files
 
 The current workspace is **Juspay's payment platform** (12 services, 94,244 symbols, Haskell primary).
@@ -137,7 +137,7 @@ HTTP server that loads Qwen3-Embedding-8B once and serves POST /embed.
 - Must be running before other servers set `EMBED_SERVER_URL`
 
 ### serve/mcp_server.py
-MCP SSE server on port 8002. Exposes 7 tools from TOOL_DISPATCH.
+MCP SSE server on port 8002. Exposes 8 tools from TOOL_DISPATCH. (AGENT_TOOLS in retrieval_engine has 12 — the extra 4 are Juspay-specific, chat-only.)
 Registered in `~/projects/hyperretrieval/.mcp.json`:
 ```json
 {"mcpServers":{"juspay-code":{"type":"sse","url":"http://127.0.0.1:8002/sse"}}}
@@ -155,7 +155,7 @@ Output: `workspaces/juspay/artifacts/cochange_index.json`
 
 ---
 
-## The 7 MCP tools (use these directly — never spawn a subagent)
+## The 8 MCP tools (use these directly — never spawn a subagent)
 
 **CRITICAL: Never spawn a general-purpose agent to answer codebase questions. Call MCP tools directly. A subagent costs 18× more tokens (93k vs 5k) and loses context.**
 

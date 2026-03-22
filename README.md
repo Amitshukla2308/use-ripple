@@ -58,7 +58,7 @@ hyperretrieval/
 │   ├── retrieval_engine.py    ← Core: loads all indexes, exposes tool functions
 │   ├── embed_server.py        ← Shared GPU embedding server (port 8001) — start FIRST
 │   ├── demo_server_v6.py      ← Chainlit chat UI (port 8000)
-│   ├── mcp_server.py          ← MCP SSE server (port 8002) — 7 tools for AI agents
+│   ├── mcp_server.py          ← MCP SSE server (port 8002) — 8 tools for AI agents
 │   ├── pr_analyzer.py         ← CLI blast-radius report for changed files
 │   ├── public/                ← Chainlit CSS + theme (must be in CWD at launch)
 │   └── .chainlit/             ← Chainlit config (name, layout, custom CSS path)
@@ -263,7 +263,7 @@ Add to `.mcp.json` in your project root (or `~/.claude/mcp.json` globally):
 
 Works with Claude Code, Cursor, and Windsurf.
 
-### The 7 MCP tools
+### The 8 MCP tools
 
 | Tool | Use when |
 |------|----------|

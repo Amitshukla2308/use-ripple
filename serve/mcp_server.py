@@ -1,7 +1,7 @@
 """
 mcp_server.py — Juspay-code MCP server
 
-Exposes codebase intelligence as 7 MCP tools.
+Exposes codebase intelligence as 8 MCP tools.
 
 Transports
 ----------
