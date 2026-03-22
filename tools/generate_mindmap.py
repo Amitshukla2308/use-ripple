@@ -1,18 +1,33 @@
 """
-generate_mindmap.py — WebGL codebase mindmap (v2).
+generate_mindmap.py — [BETA] Interactive WebGL visualisation of your codebase mind map.
 
-Produces a single self-contained HTML using the force-graph library
-(WebGL canvas — handles 100k+ nodes smoothly). No D3 SVG.
+Use this to see your mapped data visually — instead of being blind about what the
+pipeline built. The visualisation helps you:
 
-Views:
-  GALAXY   — Full module graph, live physics, animated edge particles
-  SERVICES — 12 service supernodes, cross-service flows, glowing orbits
-  CLUSTERS — Cluster convex-hull overlay on the galaxy view
+  • Verify the mind map is correct — are services separated as expected? Are clusters
+    grouping related modules? Are cross-service imports pointing in the right direction?
+  • Debug pipeline issues — a flat blob means embeddings didn't cluster; isolated nodes
+    mean import extraction missed edges; wrong service colours mean node metadata is off.
+  • Tune your map — spot over-connected hubs, orphaned modules, or missing relationships
+    before you run retrieval, so your AI tools answer questions with accurate context.
+
+Three views are built into the HTML:
+  GALAXY   — Full module graph on a 3D sphere, live physics, animated edge particles.
+  SERVICES — Service supernodes with cross-service flow arrows and call weights.
+  CLUSTERS — Cluster convex-hull overlay showing how modules group thematically.
+
+Setup:
+    export ARTIFACT_DIR=/path/to/your/workspace/artifacts   # same dir as vectors.lance
 
 Run:
-    python3 tools/generate_mindmap.py
+    python3 tools/generate_mindmap.py                  # writes mindmap.html to ARTIFACT_DIR
+    python3 tools/generate_mindmap.py --serve          # generates + opens in browser immediately
     python3 tools/generate_mindmap.py --output /tmp/mindmap.html
-    python3 tools/generate_mindmap.py --warmup 80   # layout warmup iterations
+    python3 tools/generate_mindmap.py --warmup 80      # more warmup = better initial layout
+
+Status: BETA — layout algorithm and views are functional and tested on 94k-node graphs.
+  Known limitation: spring-layout warmup is CPU-bound (~60s for large graphs); use --warmup 0
+  to skip it and let the browser physics settle instead.
 """
 import json, pathlib, sys, math, argparse, colorsys, random, hashlib
 from collections import defaultdict
@@ -27,11 +42,18 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--output",  default="")
 ap.add_argument("--warmup",  type=int, default=120,
                 help="Spring-layout iterations (baked into HTML as seed positions)")
+ap.add_argument("--serve",   action="store_true",
+                help="Start a local HTTP server and open the visualisation in your browser")
+ap.add_argument("--port",    type=int, default=8888,
+                help="Port for --serve (default 8888)")
 args = ap.parse_args()
 
-PIPELINE  = pathlib.Path("/home/beast/projects/mindmap/pipeline")
-ARTIFACTS = PIPELINE / "demo_artifact"
-OUTPUT_P  = PIPELINE / "output"
+import os as _os
+ARTIFACTS = pathlib.Path(_os.environ.get(
+    "ARTIFACT_DIR",
+    str(pathlib.Path(__file__).parent.parent / "serve" / "demo_artifact")
+))
+OUTPUT_P  = ARTIFACTS.parent / "output"
 OUT_HTML  = pathlib.Path(args.output) if args.output else ARTIFACTS / "mindmap.html"
 
 
@@ -1124,3 +1146,24 @@ print(f"""
   ⚡        Toggle animated particle flows
   Click     Pin detail panel (right)
 """)
+
+if args.serve:
+    import http.server, threading, webbrowser, functools, time as _time
+    serve_dir = str(ARTIFACTS)
+    html_name = OUT_HTML.name
+
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler, directory=serve_dir
+    )
+    with http.server.HTTPServer(("127.0.0.1", args.port), handler) as httpd:
+        url = f"http://127.0.0.1:{args.port}/{html_name}"
+        print(f"\n[visualise] Serving at {url}")
+        print(f"[visualise] Press Ctrl-C to stop.")
+        def _open():
+            _time.sleep(0.6)
+            webbrowser.open(url)
+        threading.Thread(target=_open, daemon=True).start()
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\n[visualise] Stopped.")
