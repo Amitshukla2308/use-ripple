@@ -1,8 +1,16 @@
 # HyperRetrieval
 
-A self-hosted codebase intelligence platform. Point it at your source code, run a 7-stage build pipeline, and get a structured knowledge graph of your entire codebase — queryable by humans and AI agents alike.
+Large codebases defeat LLMs. Not because LLMs are incapable — because they never see the right code at the right time. RAG over raw files is too shallow. Fine-tuning is too slow. Context windows are too small for a 100k-symbol monorepo.
 
-The **Chat UI** and **MCP server** are two reference implementations on top of that knowledge graph. The real value is the data layer: once your codebase is indexed, you can build any number of applications on top of it.
+HyperRetrieval builds a **structured knowledge graph** of your entire codebase — symbols, call graphs, semantic embeddings, co-change history, and architecture docs — and exposes it as fast, precise retrieval that AI agents can actually use.
+
+Point it at your source repos, run the build pipeline once, and every AI tool in your org gets answers grounded in real code, not hallucinations.
+
+**What ships in this repo:**
+- **Chat UI** (Chainlit) — engineers can ask architecture questions in plain English
+- **MCP server** — 8 tools that plug directly into Claude Code, Cursor, and Windsurf
+- **PR analyser** — blast-radius reports for CI/CD pipelines
+- **Retrieval engine** — the data layer; build anything else on top of it
 
 ---
 
