@@ -4,7 +4,7 @@ Large codebases defeat LLMs. Not because LLMs are incapable — because they nev
 
 HyperRetrieval builds a **structured knowledge graph** of your entire codebase — symbols, call graphs, semantic embeddings, co-change history, and architecture docs — and exposes it as fast, precise retrieval that AI agents can actually use.
 
-Point it at your source repos, run the build pipeline once, and every AI tool in your org gets answers grounded in real code, not hallucinations.
+Point it at your source repos, run the build pipeline once, and AI tools in your org can answer questions grounded in real source code — with exact function names, module paths, and traced call chains — instead of guessing.
 
 **What ships in this repo:**
 - **Chat UI** (Chainlit) — engineers can ask architecture questions in plain English
@@ -181,7 +181,7 @@ models/
 
 The Chat UI and MCP server are two reference implementations. The retrieval engine is a general-purpose data layer — any application that benefits from understanding a codebase can be built on top of it.
 
-### What large engineering organisations have used similar platforms for
+### What you can build with it
 
 **Developer tooling**
 - Automated onboarding guides — generate a "tour" of any service for new engineers
@@ -596,19 +596,19 @@ Open **http://localhost:8003**.
 
 ### The three views
 
-**Services** — Force-directed graph of all 12 services, sized by symbol count and connected by import edges (weight ≥ 3). Click a service node to jump to its clusters.
+**Services** — Force-directed graph of every service, sized by symbol count and connected by import edges (weight ≥ 3). Click a service node to jump to its clusters.
 
 **Clusters** — All named clusters colored by service, connected by top co-change edges (top 200 pairs, weight ≥ 5). Click a cluster to see its purpose, risk flags, key contracts, and top modules in the sidebar. Use the search box and service filter checkboxes to focus.
 
-**2D Scatter** — All symbols (114k+) projected to 2D via UMAP on their embedding vectors. Rendered on canvas with a quadtree for hover lookup. Color by Service or Cluster. This shows the full semantic space — semantically similar code clusters together regardless of service.
+**2D Scatter** — Every symbol projected to 2D via UMAP on its embedding vector. Rendered on canvas with a quadtree for hover lookup. Color by Service or Cluster. Semantically similar code clusters together regardless of which service it lives in.
 
 ### What is and isn't sampled
 
 | Data | Shown |
 |------|-------|
-| Services | All (12) |
-| Clusters | All named clusters (56 for Juspay) |
-| Symbols in scatter | All (114k+) — no sampling |
+| Services | All |
+| Clusters | All named clusters |
+| Symbols in scatter | All — no sampling |
 | Service edges | All with weight ≥ 3 |
 | Cluster co-change edges | Top 200 by weight |
 | Modules per cluster (sidebar) | Top 60 by symbol count |
@@ -616,6 +616,8 @@ Open **http://localhost:8003**.
 ---
 
 ## PR blast-radius analysis
+
+`pr_analyzer.py` takes a list of changed files and returns a blast-radius report: which modules are directly affected, what else historically changes alongside them (co-change), and optionally an LLM-generated risk summary. Designed to run in CI/CD pipelines as a pre-merge gate.
 
 ```bash
 git diff main...HEAD --name-only | python3 serve/pr_analyzer.py
