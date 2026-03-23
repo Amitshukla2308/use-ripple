@@ -540,41 +540,25 @@ def tool_get_log_patterns(fn_id: str) -> str:
 
 
 def tool_search_symbols(query: str, service: str = "", brief: bool = False) -> str:
-    vec_by_svc = RE.stratified_vector_search([query], k_total=150)
-    kw_by_svc  = RE.cross_service_keyword_search(query, max_per_service=20)
+    # RRF fusion of dense vector + BM25 — single ranked list per service
+    merged = RE.unified_search([query])
 
     # Collect unique modules referenced by results — suggest get_module calls
     referenced_modules: dict = {}  # module -> (svc, count)
 
     lines = [f"SYMBOL SEARCH: '{query}'"]
-    for svc in sorted(set(list(vec_by_svc) + list(kw_by_svc))):
+    for svc in sorted(merged):
         if service and svc != service:
             continue
-        seen_ids: set = set()
         svc_lines = []
-
-        # Vector results first (semantic similarity), then keyword-only hits
-        for h in vec_by_svc.get(svc, []):
+        for h in merged[svc]:
             nid = h.get("id") or h.get("name", "?")
-            if nid not in seen_ids:
-                sig = "" if brief else f" :: {h.get('type','?')[:60]}"
-                svc_lines.append(f"  ID: {nid}{sig}")
-                seen_ids.add(nid)
-                mod = h.get("module", "")
-                if mod:
-                    referenced_modules[mod] = referenced_modules.get(mod, (svc, 0))
-                    referenced_modules[mod] = (svc, referenced_modules[mod][1] + 1)
-
-        for n in kw_by_svc.get(svc, []):
-            nid = n.get("id") or n.get("name", "?")
-            if nid not in seen_ids:
-                sig = "" if brief else f" :: {n.get('type','?')[:60]}"
-                svc_lines.append(f"  ID: {nid}{sig}")
-                seen_ids.add(nid)
-                mod = n.get("module", "")
-                if mod:
-                    referenced_modules[mod] = referenced_modules.get(mod, (svc, 0))
-                    referenced_modules[mod] = (svc, referenced_modules[mod][1] + 1)
+            sig = "" if brief else f" :: {h.get('type','?')[:60]}"
+            svc_lines.append(f"  ID: {nid}{sig}")
+            mod = h.get("module", "")
+            if mod:
+                referenced_modules[mod] = referenced_modules.get(mod, (svc, 0))
+                referenced_modules[mod] = (svc, referenced_modules[mod][1] + 1)
 
         lines.extend(svc_lines[:12])
 

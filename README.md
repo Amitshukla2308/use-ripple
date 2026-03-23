@@ -32,6 +32,7 @@ Point it at your source repos, run the build pipeline once, and every AI tool in
 - [Setup from scratch](#setup-from-scratch)
 - [Embedding providers](#embedding-providers)
 - [Connecting AI agents via MCP](#connecting-ai-agents-via-mcp)
+- [Codebase visualisation](#codebase-visualisation)
 - [PR blast-radius analysis](#pr-blast-radius-analysis)
 - [Config reference](#config-reference)
 
@@ -111,6 +112,9 @@ hyperretrieval/
 │   ├── 08_generate_arch_docs.py ← [BETA] Auto-generate architecture docs via LLM
 │   │                             Generate → Verify → Correct loop, saves to docs/generated/
 │   │                             See file header for known issues and improvement TODOs
+│   ├── 09_build_viz_data.py   ← Build viz_data.json from graph + co-change (< 3 MB, fast)
+│   ├── 09b_build_scatter_data.py ← Build scatter_data.json via PCA→UMAP on symbol vectors
+│   │                             (~1 min; requires umap-learn, scikit-learn)
 │   └── run_pipeline.sh        ← Run all stages end-to-end
 │                                 Flags: --from-stage N, --only-stage N
 │                                 Auto-cleans stale outputs before each run
@@ -131,7 +135,11 @@ hyperretrieval/
 │                                 Uses RE.unified_search() for BM25+vector RRF fusion
 │
 ├── tools/
-│   └── generate_mindmap.py    ← Visualise the graph as an HTML mindmap (WebGL)
+│   └── viz/                   ← Codebase visualisation (port 8003)
+│       ├── index.html         ← D3 frontend: Services, Clusters, 2D Scatter views
+│       ├── serve.py           ← HTTP server (copies latest data files, serves on VIZ_PORT)
+│       ├── viz_data.json      ← Built by build/09_build_viz_data.py
+│       └── scatter_data.json  ← Built by build/09b_build_scatter_data.py
 │
 ├── tests/
 │   ├── test_01_artifacts.py   ← Verify build outputs exist and are non-empty
@@ -157,7 +165,9 @@ workspaces/YOUR_ORG/           ← Org-specific data (not in git)
 │   ├── body_store.json
 │   ├── call_graph.json
 │   ├── log_patterns.json
-│   └── docs.lance/
+│   ├── docs.lance/
+│   ├── viz_data.json          ← Built by 09_build_viz_data.py (services, clusters, edges)
+│   └── scatter_data.json      ← Built by 09b_build_scatter_data.py (114k symbol UMAP coords)
 ├── docs/                      ← Markdown documentation (embedded in stage 7)
 └── git_history.json
 
@@ -557,6 +567,54 @@ Works with Claude Code, Cursor, and Windsurf.
 
 ---
 
+## Codebase visualisation
+
+HyperRetrieval includes an interactive D3 visualization served on port 8003. Build the data files once after the pipeline completes, then run the server.
+
+### Build the data files
+
+```bash
+# Step 1 — graph + cluster view data (fast, < 1s)
+ARTIFACT_DIR=workspaces/YOUR_ORG/artifacts OUTPUT_DIR=workspaces/YOUR_ORG/output \
+  python3 build/09_build_viz_data.py
+
+# Step 2 — symbol scatter data: PCA → UMAP on all embeddings (~1 min)
+# Requires: pip install umap-learn scikit-learn
+ARTIFACT_DIR=workspaces/YOUR_ORG/artifacts OUTPUT_DIR=workspaces/YOUR_ORG/output \
+  python3 build/09b_build_scatter_data.py
+```
+
+> Run step 2 only when no other server is loading data — it reads the full vector store into RAM.
+
+### Start the server
+
+```bash
+OUTPUT_DIR=workspaces/YOUR_ORG/output VIZ_PORT=8003 python3 tools/viz/serve.py
+```
+
+Open **http://localhost:8003**.
+
+### The three views
+
+**Services** — Force-directed graph of all 12 services, sized by symbol count and connected by import edges (weight ≥ 3). Click a service node to jump to its clusters.
+
+**Clusters** — All named clusters colored by service, connected by top co-change edges (top 200 pairs, weight ≥ 5). Click a cluster to see its purpose, risk flags, key contracts, and top modules in the sidebar. Use the search box and service filter checkboxes to focus.
+
+**2D Scatter** — All symbols (114k+) projected to 2D via UMAP on their embedding vectors. Rendered on canvas with a quadtree for hover lookup. Color by Service or Cluster. This shows the full semantic space — semantically similar code clusters together regardless of service.
+
+### What is and isn't sampled
+
+| Data | Shown |
+|------|-------|
+| Services | All (12) |
+| Clusters | All named clusters (56 for Juspay) |
+| Symbols in scatter | All (114k+) — no sampling |
+| Service edges | All with weight ≥ 3 |
+| Cluster co-change edges | Top 200 by weight |
+| Modules per cluster (sidebar) | Top 60 by symbol count |
+
+---
+
 ## PR blast-radius analysis
 
 ```bash
@@ -663,6 +721,18 @@ doc_generation:
 ## Design decisions and learnings
 
 Every non-obvious decision in this system has a reason. This section explains what was built, what was tried first, what failed, and why the current approach is the right one. It is written to help anyone picking up this codebase understand not just *what* the system does but *why* it does it that way.
+
+---
+
+### Why the visualisation moved from WebGL mindmap to D3 (tools/viz)
+
+The first visualisation was a single-file WebGL renderer (`generate_mindmap.py`) that generated a self-contained HTML file with Three.js force-directed graph. It worked for small codebases but had three problems at scale:
+
+1. **Generated-file anti-pattern.** The script read the full graph JSON, templated it into an HTML string, and wrote it to disk. Any change to the data required regenerating the file. There was no separation between data pipeline and frontend.
+2. **WebGL at 100k+ nodes.** Three.js force simulation on 114k nodes consumed ~4 GB RAM in the browser tab and became unresponsive. The viz needed to operate at cluster and service granularity, not symbol granularity.
+3. **Single view.** A force graph of raw symbols is visually noisy and hard to navigate. Engineers need to zoom in from service → cluster → module, not stare at a hairball.
+
+The replacement (`tools/viz/`) separates data building (two offline scripts) from serving (a static HTTP server). The D3 frontend has three distinct views at different granularities, edge filtering to prevent hairballs, and a separate UMAP scatter for the full 114k symbol space rendered efficiently on canvas.
 
 ---
 

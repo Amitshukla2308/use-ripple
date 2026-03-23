@@ -34,3 +34,7 @@ serve/demo_server_v6.py
 tools.py
 
 *.bak
+
+# Viz data files (org-specific, built locally)
+tools/viz/viz_data.json
+tools/viz/scatter_data.json
