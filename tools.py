@@ -6,8 +6,13 @@ This is where you add, remove, or modify tools for your deployment.
 - Override persona: set _DEFAULT_SYSTEM_PROMPT and _DEFAULT_FRAMEWORK below.
 - The retrieval primitives (vector search, graph traversal) live in retrieval_engine.py — no need to touch them.
 """
-import sys, json, os, re
+import sys, json, os, re, hashlib, threading
 import pathlib
+
+# ── Context chunk cache ───────────────────────────────────────────────────────
+_CTX_CACHE: dict[str, list[str]] = {}
+_CTX_LOCK   = threading.Lock()
+_MAX_CTX_CACHE = 30   # max concurrent cached contexts (oldest evicted)
 sys.path.insert(0, str(pathlib.Path(__file__).parent / "serve"))
 import retrieval_engine as RE
 
@@ -174,7 +179,10 @@ AGENT_TOOLS = [
             "Prefer reading bodies over guessing from signatures — the gap between spec and "
             "implementation is where bugs live.\n\n"
             "Batch multiple get_function_body calls in a single response when you need to read "
-            "several functions and they are independent of each other."
+            "several functions and they are independent of each other.\n\n"
+            "If the response says 'SYMBOL (no body extracted)', the ID points to a type alias, "
+            "constant, or data constructor — not a function. Do NOT retry get_function_body on it. "
+            "Use get_type_definition instead for types, or read the surrounding module with get_module."
         ),
         "parameters": {"type": "object", "properties": {
             "fn_id": {
@@ -262,12 +270,14 @@ AGENT_TOOLS = [
     {"type": "function", "function": {
         "name": "search_docs",
         "description": (
-            "Search internal documentation and public API references.\n\n"
-            "Use this when:\n"
-            "- The question is about a payment protocol (UPI, EMI, mandate) rather than a specific function\n"
-            "- The user asks about external behaviour (API contract, gateway spec, webhook format)\n"
-            "- Code search returned results but you need the design intent behind them\n\n"
-            "Use AFTER code search, not instead of it — docs describe intent, code is ground truth."
+            "Search indexed internal developer documentation.\n\n"
+            "IMPORTANT — current index contains ONLY internal Haskell library notes: "
+            "database layer (Beam ORM), caching layer, connection pooling, code style guides. "
+            "It does NOT contain payment flow docs, UPI specs, API contracts, gateway specs, "
+            "or merchant integration guides.\n\n"
+            "Use this ONLY when the question is specifically about the DB/ORM layer or caching "
+            "internals. Do NOT call this for payment protocol questions, UPI/EMI/mandate flows, "
+            "or gateway behaviour — use search_symbols and get_function_body instead."
         ),
         "parameters": {"type": "object", "properties": {
             "query": {"type": "string"},
@@ -347,13 +357,26 @@ AGENT_TOOLS = [
     {"type": "function", "function": {
         "name": "get_context",
         "description": (
-            "Last resort — returns a large pre-built context block (~5k-18k tokens) covering the query.\n\n"
-            "Only use if search_symbols + get_function_body have failed to find what you need. "
-            "Never call twice in one session — it is expensive."
+            "Last resort — builds a full cross-service context block and returns part 1 of 3.\n\n"
+            "Only call if search_symbols + get_function_body have genuinely failed after 3+ attempts. "
+            "Part 1 alone is often sufficient — read it before deciding whether to call get_context_continue. "
+            "Do not call this if a targeted search has not been tried yet."
         ),
         "parameters": {"type": "object", "properties": {
             "query": {"type": "string", "description": "The original user question."}
         }, "required": ["query"]}
+    }},
+    {"type": "function", "function": {
+        "name": "get_context_continue",
+        "description": (
+            "Retrieve part 2 or 3 of a get_context result. "
+            "Only call if the previous part was insufficient and you need more context. "
+            "Use the token returned by get_context."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "token": {"type": "string", "description": "The token returned by get_context."},
+            "part":  {"type": "integer", "description": "The part number to retrieve (2 or 3)."},
+        }, "required": ["token", "part"]}
     }},
 ]
 
@@ -782,16 +805,48 @@ def tool_get_type_definition(type_name: str, service: str = "") -> str:
 
 
 def tool_get_context(query: str) -> str:
-    """Last-resort: build full cross-service context for a query (expensive, ~5k-18k tokens)."""
+    """Last-resort: build full cross-service context, split into 3 chunks. Returns chunk 1/3."""
     if RE.G is None:
         return "Graph not loaded."
-    vec_by_svc  = RE.stratified_vector_search(query)
-    kw_by_svc   = RE.cross_service_keyword_search(query)
+    vec_by_svc     = RE.stratified_vector_search(query)
+    kw_by_svc      = RE.cross_service_keyword_search(query)
     cluster_by_svc = RE.get_cluster_context_for_services(
         list(set(list(vec_by_svc) + list(kw_by_svc)))
     )
     doc_hits = RE.doc_vector_search(RE._encode_query(query), top_k=3) if RE.doc_lance_tbl is not None else []
-    return _build_base_context(vec_by_svc, kw_by_svc, cluster_by_svc, "default", doc_hits)
+    full = _build_base_context(vec_by_svc, kw_by_svc, cluster_by_svc, "default", doc_hits)
+
+    # Split into 3 equal chunks by character count
+    n = len(full)
+    size = max(n // 3, 1)
+    chunks = [full[:size], full[size:2*size], full[2*size:]]
+    chunks = [c for c in chunks if c.strip()]  # drop empty tail chunks
+
+    token = hashlib.md5(query.encode()).hexdigest()[:10]
+    with _CTX_LOCK:
+        if len(_CTX_CACHE) >= _MAX_CTX_CACHE:
+            del _CTX_CACHE[next(iter(_CTX_CACHE))]  # evict oldest
+        _CTX_CACHE[token] = chunks
+
+    total = len(chunks)
+    suffix = (f"\n\n[Part 1/{total} — if this is insufficient, call "
+              f"get_context_continue with token='{token}' and part=2]") if total > 1 else ""
+    return f"[Context part 1/{total}]\n\n{chunks[0]}{suffix}"
+
+
+def tool_get_context_continue(token: str, part: int) -> str:
+    """Retrieve the next chunk of a get_context result. Use only if part 1 was insufficient."""
+    chunks = _CTX_CACHE.get(token)
+    if not chunks:
+        return f"Token '{token}' not found or expired — call get_context again."
+    if part < 2 or part > len(chunks):
+        return f"Invalid part {part}. Valid range: 2–{len(chunks)}."
+    chunk = chunks[part - 1]
+    total = len(chunks)
+    is_last = (part == total)
+    suffix = ("\n\n[End of context]" if is_last else
+              f"\n\n[Call get_context_continue(token='{token}', part={part+1}) for more]")
+    return f"[Context part {part}/{total}]\n\n{chunk}{suffix}"
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -808,6 +863,7 @@ TOOL_DISPATCH: dict = {
     "get_module":            lambda a: tool_get_module(a.get("module_name",""), a.get("service",""), a.get("max_symbols", 30)),
     "get_blast_radius":      lambda a: str(RE.get_blast_radius(a.get("files_or_modules", []))),
     "get_context":           lambda a: tool_get_context(a.get("query","")),
+    "get_context_continue":  lambda a: tool_get_context_continue(a.get("token",""), int(a.get("part", 2))),
     "search_docs":           lambda a: tool_search_docs(a.get("query",""), a.get("tags",[])),
     "get_gateway_integrity": lambda a: tool_get_gateway_integrity(a.get("gateway_name","")),
     "get_type_definition":   lambda a: tool_get_type_definition(a.get("type_name",""), a.get("service","")),
