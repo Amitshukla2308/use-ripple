@@ -86,7 +86,7 @@ _KW_STOPWORDS: set = {
     "what", "does", "that", "this", "with", "from", "have", "been", "when",
     "where", "which", "will", "would", "could", "should", "work", "works",
     "tell", "show", "give", "list", "find", "about", "around", "across",
-    "payment", "payments", "service", "services", "flow", "flows",
+    "service", "services",
     "code", "function", "module", "support", "supports", "using", "used", "uses",
     "handle", "handles", "process", "processes", "call", "calls",
     "implement", "implemented", "implementation",
@@ -576,7 +576,7 @@ def cross_service_keyword_search(query: str, max_per_service: int = 15) -> dict:
     # Sort by match count descending — nodes matching more query words rank first
     for bucket in (prod_results, test_results):
         for svc in bucket:
-            bucket[svc].sort(key=lambda n: -n.get("_kw_score", 0))
+            bucket[svc].sort(key=lambda n: (-n.get("_kw_score", 0), len(n.get("name", "") + n.get("module", ""))))
 
     # Merge: fill each service slot with production results first, test code as overflow
     results: dict = defaultdict(list)
