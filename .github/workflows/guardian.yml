@@ -127,9 +127,21 @@ jobs:
         if: ${{ vars.GUARDIAN_BLOCKING == 'true' }}
         run: |
           if [ -f /tmp/guardian_report.json ]; then
-            STATUS=$(python3 -c "import json; d=json.load(open('/tmp/guardian_report.json')); print(d.get('verdict',{}).get('status','PASS'))")
-            if [ "$STATUS" = "FAIL" ]; then
-              echo "::error::Guardian verdict: FAIL — PR is likely incomplete"
-              exit 1
-            fi
+            python3 -c "
+          import json, sys, os
+          d = json.load(open('/tmp/guardian_report.json'))
+          status = d.get('verdict', {}).get('status', 'PASS')
+          risk_score = d.get('risk', {}).get('risk_score', 0)
+          threshold = int(os.environ.get('RISK_THRESHOLD', '0'))
+
+          if status == 'FAIL':
+              print(f'::error::Guardian verdict: FAIL — PR is likely incomplete')
+              sys.exit(1)
+          if threshold > 0 and risk_score >= threshold:
+              print(f'::error::Risk score {risk_score}/100 exceeds threshold {threshold}')
+              sys.exit(1)
+          print(f'Guardian: {status}, Risk: {risk_score}/100')
+          "
           fi
+        env:
+          RISK_THRESHOLD: ${{ vars.GUARDIAN_RISK_THRESHOLD || '0' }}
