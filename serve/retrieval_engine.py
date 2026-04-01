@@ -56,6 +56,8 @@ cochange_index:      dict  = {}
 file_to_nodes:       dict  = {}   # module_name → [node_id, ...]
 filepath_to_module:  dict  = {}   # relative_file_path → module_name
 _cochange_loaded_at: float = 0.0
+_mg_to_cc:           dict  = {}   # MG dot-name → cochange ::key
+_cc_to_mg:           dict  = {}   # cochange ::key → MG dot-name
 
 body_store:   dict = {}
 call_graph:   dict = {}
@@ -362,6 +364,7 @@ def initialize(
             _cochange_loaded_at = cochange_path.stat().st_mtime
             meta = ci.get("meta", {})
             print(f"  {meta.get('total_modules',0):,} modules  {meta.get('total_pairs',0):,} pairs")
+            _build_cochange_name_map()
         else:
             print("  co-change index: not built yet")
 
@@ -387,6 +390,7 @@ def initialize(
                         cochange_index.clear()
                         cochange_index.update(ci.get("edges", {}))
                         _cochange_loaded_at = mtime
+                        _build_cochange_name_map()
                         meta = ci.get("meta", {})
                         print(f"[hot-reload] co-change: {meta.get('total_modules',0):,} modules")
                 except Exception as _e:
@@ -420,6 +424,36 @@ def initialize(
         f"cochange={'yes' if cochange_index else 'no'}"
     )
     print(f"✓ Engine ready ({status})")
+
+
+def _build_cochange_name_map():
+    """Build bidirectional mapping between MG dot-names and cochange ::keys.
+
+    Cochange keys look like: ``repo::path::Module::Parts``
+    MG nodes look like:      ``Module.Parts``
+
+    Haskell module name segments start with uppercase; repo/path segments
+    are lowercase (or contain hyphens/digits).  We extract the module name
+    by finding the first uppercase segment in the cochange key.
+    """
+    _mg_to_cc.clear()
+    _cc_to_mg.clear()
+    mg_nodes = set(MG.nodes()) if MG is not None else set()
+    for cc_key in cochange_index:
+        parts = cc_key.split("::")
+        # Find first part that starts with uppercase → module name start
+        for i, part in enumerate(parts):
+            if part and part[0].isupper():
+                mg_name = ".".join(parts[i:])
+                _cc_to_mg[cc_key] = mg_name
+                # Only map mg→cc if the MG node actually exists (avoid ambiguity)
+                if mg_name in mg_nodes:
+                    _mg_to_cc[mg_name] = cc_key
+                elif mg_name not in _mg_to_cc:
+                    # Store even without MG match — useful for traversal results
+                    _mg_to_cc[mg_name] = cc_key
+                break
+    print(f"  Co-change name map: {len(_mg_to_cc):,} mg→cc, {len(_cc_to_mg):,} cc→mg")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -586,14 +620,31 @@ def module_graph_expand(seed_modules: list, depth: int = 2) -> dict:
     return {m: d for m, d in visited.items() if d["hop"] > 0}
 
 
+def _resolve_cc(name: str) -> str:
+    """Resolve a module name to its cochange_index key.
+    Accepts both MG dot-format and native cochange ::format."""
+    if name in cochange_index:
+        return name
+    return _mg_to_cc.get(name, name)
+
+
+def _resolve_mg(name: str) -> str:
+    """Resolve a cochange key back to MG dot-format."""
+    if "." in name and "::" not in name:
+        return name  # already dot-format
+    return _cc_to_mg.get(name, name)
+
+
 def cochange_path_traverse(seed_modules: list, max_hops: int = 4,
                             top_k: int = 15, min_weight: int = 5) -> list:
     if not cochange_index:
         return []
     visited = {}
-    queue = [(m, 999, 0) for m in seed_modules if m in cochange_index]
-    for mod in seed_modules:
-        visited[mod] = (999, 0)
+    for m in seed_modules:
+        cc_key = _resolve_cc(m)
+        if cc_key in cochange_index:
+            visited[cc_key] = (999, 0)
+    queue = [(k, 999, 0) for k in visited]
     while queue:
         current, _, hop = queue.pop(0)
         if hop >= max_hops:
@@ -602,10 +653,14 @@ def cochange_path_traverse(seed_modules: list, max_hops: int = 4,
             pm, pw = p["module"], p["weight"]
             if pw < min_weight:
                 break
-            if pm not in visited:
-                visited[pm] = (pw, hop+1)
-                queue.append((pm, pw, hop+1))
-    result = [{"module": m, "weight": w, "hop": h} for m,(w,h) in visited.items() if h > 0]
+            # Normalize neighbor key for consistent lookup
+            cc_pm = _resolve_cc(pm)
+            if cc_pm not in visited:
+                visited[cc_pm] = (pw, hop+1)
+                queue.append((cc_pm, pw, hop+1))
+    # Return results in MG dot-format for downstream compatibility
+    result = [{"module": _resolve_mg(m), "weight": w, "hop": h}
+              for m, (w, h) in visited.items() if h > 0]
     result.sort(key=lambda x: (x["hop"], -x["weight"]))
     return result
 
@@ -862,24 +917,26 @@ def _inject_synthetic_cochange():
         caller_mod = ".".join(parts[:-1]) if len(parts) > 1 else nid
         if caller_mod not in MG.nodes:
             continue
-        has_history = bool(cochange_index.get(caller_mod))
+        caller_cc = _resolve_cc(caller_mod)
+        has_history = bool(cochange_index.get(caller_cc))
         for callee_name in info.get("callees", []):
             for callee_mod in shortname_to_mod.get(callee_name, []):
                 if callee_mod == caller_mod:
                     continue
-                callee_has_history = bool(cochange_index.get(callee_mod))
+                callee_cc = _resolve_cc(callee_mod)
+                callee_has_history = bool(cochange_index.get(callee_cc))
                 if has_history and callee_has_history:
                     continue   # both have real data — no need to synthesise
-                existing = {p["module"] for p in cochange_index.get(caller_mod, [])}
-                if callee_mod not in existing:
-                    cochange_index.setdefault(caller_mod, []).append(
-                        {"module": callee_mod, "weight": SYNTHETIC_WEIGHT, "synthetic": True}
+                existing = {p["module"] for p in cochange_index.get(caller_cc, [])}
+                if callee_cc not in existing:
+                    cochange_index.setdefault(caller_cc, []).append(
+                        {"module": callee_cc, "weight": SYNTHETIC_WEIGHT, "synthetic": True}
                     )
                     injected += 1
-                existing2 = {p["module"] for p in cochange_index.get(callee_mod, [])}
-                if caller_mod not in existing2:
-                    cochange_index.setdefault(callee_mod, []).append(
-                        {"module": caller_mod, "weight": SYNTHETIC_WEIGHT, "synthetic": True}
+                existing2 = {p["module"] for p in cochange_index.get(callee_cc, [])}
+                if caller_cc not in existing2:
+                    cochange_index.setdefault(callee_cc, []).append(
+                        {"module": caller_cc, "weight": SYNTHETIC_WEIGHT, "synthetic": True}
                     )
                     injected += 1
     if injected:
