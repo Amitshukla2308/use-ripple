@@ -23,7 +23,7 @@ except ImportError:
 # ── LLM config (from env or config.yaml) ─────────────────────────────────────
 LLM_API_KEY  = os.environ.get("LLM_API_KEY",  "")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")
-LLM_MODEL    = os.environ.get("LLM_MODEL",    "reasoning-large-model")
+LLM_MODEL    = os.environ.get("LLM_MODEL",    "kimi-latest")
 MAX_TOOL_CALLS = 12
 
 # ── Embed server URL (set to delegate GPU model to embed_server.py) ───────────
@@ -262,7 +262,8 @@ def initialize(
 
     if G is None:
         print("Loading graph...")
-        graph_data = json.load(open(GRAPH_PATH))
+        with open(GRAPH_PATH) as _f:
+            graph_data = json.load(_f)
         G = nx.node_link_graph(graph_data["networkx"])
         cluster_summaries.update(graph_data.get("cluster_summaries", {}))
 
@@ -355,7 +356,8 @@ def initialize(
 
         if cochange_path.exists():
             print("Loading co-change index...")
-            ci = json.load(open(str(cochange_path)))
+            with open(str(cochange_path)) as _f:
+                ci = json.load(_f)
             cochange_index.update(ci.get("edges", {}))
             _cochange_loaded_at = cochange_path.stat().st_mtime
             meta = ci.get("meta", {})
@@ -372,21 +374,23 @@ def initialize(
             _build_bm25_index()
 
         # Hot-reload watcher for co-change (used when builder is still running)
+        _cochange_stop = threading.Event()
         def _cochange_watcher():
             global _cochange_loaded_at
-            while True:
-                time.sleep(30)
+            while not _cochange_stop.is_set():
+                _cochange_stop.wait(30)
                 try:
                     mtime = cochange_path.stat().st_mtime
                     if mtime > _cochange_loaded_at and cochange_path.stat().st_size > 1000:
-                        ci = json.load(open(str(cochange_path)))
+                        with open(str(cochange_path)) as _f:
+                            ci = json.load(_f)
                         cochange_index.clear()
                         cochange_index.update(ci.get("edges", {}))
                         _cochange_loaded_at = mtime
                         meta = ci.get("meta", {})
                         print(f"[hot-reload] co-change: {meta.get('total_modules',0):,} modules")
-                except Exception:
-                    pass
+                except Exception as _e:
+                    print(f"[hot-reload] error: {_e}")
         threading.Thread(target=_cochange_watcher, daemon=True).start()
 
     # Embedder: load in-process only if not using embed server

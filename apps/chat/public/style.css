@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   JUSPAY | CODE  —  Fluid Dark UI
+   HYPERRETRIEVAL  —  Fluid Dark UI
    ═══════════════════════════════════════════════════════════════════════════ */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
@@ -67,7 +67,7 @@ a[href*="chainlit.io"] { display: none !important; }
 }
 
 #welcome-screen::before {
-  content: "JUSPAY | CODE" !important;
+  content: "HYPERRETRIEVAL" !important;
   font-family: 'JetBrains Mono', monospace !important;
   font-size: 24px !important;
   font-weight: 500 !important;
@@ -79,7 +79,7 @@ a[href*="chainlit.io"] { display: none !important; }
 }
 
 #welcome-screen::after {
-  content: "payment platform intelligence" !important;
+  content: "codebase intelligence" !important;
   font-family: var(--jp-font) !important;
   font-size: 13px !important;
   letter-spacing: 0.2em !important;
@@ -315,9 +315,8 @@ pre code {
   position: sticky !important;
   bottom: 0 !important;
   z-index: 100 !important;
-  /* Fade the page content behind it rather than a hard border */
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 18px) !important;
-  mask-image: linear-gradient(to bottom, transparent 0%, black 18px) !important;
+  /* Background fade to blend with page — uses pseudo-element instead of mask
+     (mask-image makes transparent regions non-interactive in some browsers) */
 }
 
 /* The visual composer card — Chainlit's inner box */
@@ -402,7 +401,12 @@ pre code {
   background: transparent !important;
   color: var(--jp-muted2) !important;
   opacity: 0.5 !important;
-  pointer-events: none !important;
+}
+
+/* Ensure send button is always clickable when enabled */
+#chat-input button:not(:disabled) {
+  pointer-events: auto !important;
+  cursor: pointer !important;
 }
 
 /* ── Scrollbar ──────────────────────────────────────────────────────────── */

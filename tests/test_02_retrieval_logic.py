@@ -50,6 +50,7 @@ def _safe_import(name, *args, **kwargs):
             async def send(self): pass
             output = ""
         m.set_chat_profiles = lambda f: f
+        m.set_starters      = lambda f: f
         m.on_message        = lambda f: f
         m.on_chat_start     = lambda f: f
         m.ChatProfile       = type("ChatProfile", (), {"__init__": lambda self, **kw: None})
@@ -190,15 +191,17 @@ RE.body_store = _orig_bs
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 8. chat profile count
+# 8. starters count (decorator registers with Chainlit, function name varies)
 # ══════════════════════════════════════════════════════════════════════════════
-print("\n=== 8. chat profile count ===")
+print("\n=== 8. starters count ===")
 import asyncio
-profiles = asyncio.get_event_loop().run_until_complete(DS.set_chat_profiles())
-check("Exactly 1 chat profile", len(profiles), 1)
-if profiles:
-    name = getattr(profiles[0], "name", "?")
-    check_true("Profile has a name", bool(name), f"name={name!r}")
+# Find the decorated function — @cl.set_starters makes it a plain function
+_starter_fn = getattr(DS, "set_starters", None) or getattr(DS, "set_chat_profiles", None)
+if _starter_fn:
+    starters = asyncio.get_event_loop().run_until_complete(_starter_fn())
+    check_true("Has starters", len(starters) >= 1, f"got {len(starters)}")
+else:
+    check_true("Has starters function", False, "no set_starters or set_chat_profiles found")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

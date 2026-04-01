@@ -9,14 +9,33 @@ Clean ReAct architecture:
 
 No pre-retrieval, no fast_route, no context pre-loading.
 """
-import asyncio, json, os, pathlib, sys, time, threading, uuid
+import asyncio, hashlib, json, os, pathlib, sys, time, threading, uuid
 import chainlit as cl
+import chainlit.data as cl_data
+from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 
 _REPO = pathlib.Path(__file__).parent.parent.parent   # apps/chat → apps → repo root
 sys.path.insert(0, str(_REPO))                        # for tools.py
 sys.path.insert(0, str(_REPO / "serve"))              # for retrieval_engine.py
 import retrieval_engine as RE
 import tools as T
+
+# ── Filter tools for query agent ──────────────────────────────────────────────
+# Keep retrieval tools + read-only file tools (read_file, grep_files, glob_files)
+# for deep codebase investigation (codetoolcli-style). Remove write/execute tools
+# since this is a query agent, not a code editor.
+_WRITE_TOOLS = {"run_bash", "write_file", "edit_file"}
+_CHAT_TOOLS    = [t for t in T.AGENT_TOOLS if t["function"]["name"] not in _WRITE_TOOLS]
+_CHAT_DISPATCH = {k: v for k, v in T.TOOL_DISPATCH.items() if k not in _WRITE_TOOLS}
+
+# Fix CWD for file tools — chainlit runs from apps/chat/ but source code is elsewhere.
+# Point file tools at the source directory so read_file/grep_files find actual code.
+_SOURCE_DIR = os.environ.get("HRCODE_CWD") or str(
+    pathlib.Path(os.environ.get("ARTIFACT_DIR", "")).parent / "source"
+    if os.environ.get("ARTIFACT_DIR")
+    else _REPO
+)
+os.environ.setdefault("HRCODE_CWD", _SOURCE_DIR)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 _HERE          = pathlib.Path(__file__).resolve().parent
@@ -26,11 +45,292 @@ ARTIFACT_DIR   = pathlib.Path(os.environ.get(
 ))
 LLM_API_KEY    = os.environ.get("LLM_API_KEY",  "")
 LLM_BASE_URL   = os.environ.get("LLM_BASE_URL", "")
-LLM_MODEL      = os.environ.get("LLM_MODEL",    "reasoning-large-model")
+LLM_MODEL      = os.environ.get("LLM_MODEL",    "kimi-latest")
 MAX_HISTORY    = 6
 MAX_TOOL_CALLS = 50   # hard ceiling — LLM self-terminates; this is runaway protection only
 MAX_SAME_CALL  = 2    # break if identical (tool, args) repeats this many times
 RETRIEVAL_LOG  = pathlib.Path(os.environ.get("OUTPUT_DIR", "/tmp")) / "retrieval_log.jsonl"
+_THREADS_DB    = pathlib.Path(os.environ.get("OUTPUT_DIR", "/tmp")) / "chat_threads.db"
+
+# ── Persistent thread storage (SQLite via Chainlit data layer) ────────────────
+# Note: "storage client not initialized" warning is expected — no file attachments needed.
+class _PatchedSQLLayer(SQLAlchemyDataLayer):
+    """SQLAlchemyDataLayer with SQLite-safe tag serialisation (upstream passes list directly)."""
+    async def update_thread(self, thread_id, name=None, user_id=None, metadata=None, tags=None):
+        if isinstance(tags, list):
+            tags = json.dumps(tags)   # SQLite can't bind a Python list
+        return await super().update_thread(
+            thread_id=thread_id, name=name, user_id=user_id,
+            metadata=metadata, tags=tags,
+        )
+
+import logging as _logging
+_logging.getLogger("chainlit").setLevel(_logging.ERROR)
+cl_data._data_layer = _PatchedSQLLayer(
+    conninfo=f"sqlite+aiosqlite:///{_THREADS_DB}",
+    show_logger=False,
+)
+_logging.getLogger("chainlit").setLevel(_logging.WARNING)
+
+# ── Eager schema migration (must run before Chainlit queries the DB) ─────────
+# Chainlit loads sidebar threads at startup, before on_chat_start fires.
+# If the DB was created with an older schema, these ALTER TABLEs add the
+# columns that newer Chainlit versions expect.
+def _migrate_db_sync():
+    import sqlite3
+    try:
+        con = sqlite3.connect(str(_THREADS_DB))
+        for stmt in [
+            # Core Chainlit tables
+            'CREATE TABLE IF NOT EXISTS users ("id" TEXT PRIMARY KEY, "identifier" TEXT UNIQUE, "metadata" TEXT, "createdAt" TEXT)',
+            'CREATE TABLE IF NOT EXISTS threads ("id" TEXT PRIMARY KEY, "createdAt" TEXT, "name" TEXT, "userId" TEXT, "userIdentifier" TEXT, "tags" TEXT, "metadata" TEXT)',
+            'CREATE TABLE IF NOT EXISTS steps ("id" TEXT PRIMARY KEY, "threadId" TEXT, "parentId" TEXT, "createdAt" TEXT, "start" TEXT, "end" TEXT, "input" TEXT, "output" TEXT, "name" TEXT, "type" TEXT, "streaming" INTEGER, "isError" INTEGER, "waitForAnswer" INTEGER, "defaultOpen" INTEGER, "autoCollapse" INTEGER, "showInput" TEXT, "metadata" TEXT, "generation" TEXT, "tags" TEXT, "language" TEXT)',
+            'CREATE TABLE IF NOT EXISTS elements ("id" TEXT PRIMARY KEY, "threadId" TEXT, "type" TEXT, "chainlitKey" TEXT, "url" TEXT, "objectKey" TEXT, "name" TEXT, "display" TEXT, "size" TEXT, "language" TEXT, "page" INTEGER, "forId" TEXT, "mime" TEXT, "props" TEXT)',
+            'CREATE TABLE IF NOT EXISTS feedbacks ("id" TEXT PRIMARY KEY, "forId" TEXT, "threadId" TEXT, "value" REAL, "comment" TEXT)',
+            # App-specific account table (must exist before auth_callback runs)
+            'CREATE TABLE IF NOT EXISTS hr_accounts ("username" TEXT PRIMARY KEY, "password_hash" TEXT NOT NULL, "display_name" TEXT, "onboarded" INTEGER DEFAULT 0, "created_at" TEXT, "last_login" TEXT)',
+            # Column migrations for older DBs
+            'ALTER TABLE steps ADD COLUMN "tags" TEXT',
+            'ALTER TABLE steps ADD COLUMN "language" TEXT',
+            'ALTER TABLE elements ADD COLUMN "chainlitKey" TEXT',
+            'ALTER TABLE elements ADD COLUMN "props" TEXT',
+        ]:
+            try:
+                con.execute(stmt)
+            except Exception:
+                pass  # column/table already exists
+        con.commit()
+        con.close()
+    except Exception as _e:
+        print(f"[db] eager migration error: {_e}")
+
+_migrate_db_sync()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# USER AUTHENTICATION + SELF-REGISTRATION
+# ════════════════════════════════════════════════════════════════════════════
+# Uses a local hr_accounts table in chat_threads.db.
+# New users are auto-registered on first login — no admin step needed.
+# Optional static override: HRCODE_USERS=user:pass env var (plain or sha256:hash).
+# ════════════════════════════════════════════════════════════════════════════
+
+def _hash_password(password: str) -> str:
+    return "sha256:" + hashlib.sha256(password.encode()).hexdigest()
+
+
+def _verify_password(stored_hash: str, supplied: str) -> bool:
+    if stored_hash.startswith("sha256:"):
+        return hashlib.sha256(supplied.encode()).hexdigest() == stored_hash[7:]
+    return stored_hash == supplied   # plain-text fallback (legacy config.yaml entries)
+
+
+def _db_get_account(username: str) -> "dict | None":
+    """Synchronous — safe to call from @cl.password_auth_callback."""
+    import sqlite3, datetime
+    try:
+        con = sqlite3.connect(str(_THREADS_DB))
+        con.row_factory = sqlite3.Row
+        row = con.execute(
+            "SELECT * FROM hr_accounts WHERE username = ?",
+            (username.lower(),)
+        ).fetchone()
+        con.close()
+        return dict(row) if row else None
+    except Exception as _e:
+        print(f"[db] get_account error: {_e}")
+        return None
+
+
+def _db_create_account(username: str, password: str) -> None:
+    """Create a new account. Synchronous — safe from auth_callback."""
+    import sqlite3, datetime
+    now = datetime.datetime.utcnow().isoformat()
+    try:
+        con = sqlite3.connect(str(_THREADS_DB))
+        con.execute(
+            "INSERT OR IGNORE INTO hr_accounts (username, password_hash, onboarded, created_at, last_login) "
+            "VALUES (?, ?, 0, ?, ?)",
+            (username.lower(), _hash_password(password), now, now),
+        )
+        con.commit()
+        con.close()
+    except Exception as _e:
+        print(f"[db] create_account error: {_e}")
+
+
+def _db_touch_login(username: str) -> None:
+    import sqlite3, datetime
+    try:
+        con = sqlite3.connect(str(_THREADS_DB))
+        con.execute(
+            "UPDATE hr_accounts SET last_login = ? WHERE username = ?",
+            (datetime.datetime.utcnow().isoformat(), username.lower()),
+        )
+        con.commit()
+        con.close()
+    except Exception as _e:
+        print(f"[db] touch_login error: {_e}")
+
+
+def _static_users() -> "dict[str, str]":
+    """Optional hard-coded override from env or config.yaml hr_users section."""
+    raw = os.environ.get("HRCODE_USERS", "")
+    if raw:
+        return {u.strip().lower(): p.strip()
+                for pair in raw.split(",") if ":" in pair
+                for u, p in [pair.split(":", 1)]}
+    _workspace_dir = pathlib.Path(os.environ.get("ARTIFACT_DIR", "")).parent if os.environ.get("ARTIFACT_DIR") else None
+    cfg = pathlib.Path(os.environ.get("HRCODE_CONFIG",
+          str(_workspace_dir / "config.yaml") if _workspace_dir else ""))
+    if cfg.exists():
+        try:
+            import yaml  # type: ignore
+            data = yaml.safe_load(cfg.read_text())
+            return {k.lower(): str(v) for k, v in (data.get("hr_users") or {}).items()}
+        except Exception:
+            pass
+    return {}
+
+
+@cl.password_auth_callback
+def auth_callback(username: str, password: str) -> "cl.User | None":
+    """
+    Login + self-registration in one callback:
+      - Static users (env/config.yaml) take priority.
+      - For DB accounts: existing → verify; unknown → auto-register.
+      - Passes is_new=True in metadata so on_start can trigger onboarding.
+    """
+    uname = username.strip()
+    if not uname or not password:
+        return None
+
+    # Static override
+    static = _static_users()
+    if static:
+        stored = static.get(uname.lower())
+        if stored and _verify_password(stored, password):
+            acct = _db_get_account(uname)
+            onboarded = bool(acct and acct.get("onboarded"))
+            return cl.User(identifier=uname, metadata={"role": "user", "is_new": not onboarded})
+        return None
+
+    # DB-backed auth
+    acct = _db_get_account(uname)
+    if acct:
+        if not _verify_password(acct["password_hash"], password):
+            return None   # wrong password
+        _db_touch_login(uname)
+        onboarded = bool(acct.get("onboarded"))
+        return cl.User(identifier=uname, metadata={"role": "user", "is_new": not onboarded})
+    else:
+        # New user — auto-register
+        _db_create_account(uname, password)
+        return cl.User(identifier=uname, metadata={"role": "user", "is_new": True})
+
+
+async def _mark_onboarded(username: str) -> None:
+    import aiosqlite
+    try:
+        async with aiosqlite.connect(str(_THREADS_DB)) as db:
+            await db.execute(
+                "UPDATE hr_accounts SET onboarded = 1 WHERE username = ?",
+                (username.lower(),)
+            )
+            await db.commit()
+    except Exception as _e:
+        print(f"[db] mark_onboarded error: {_e}")
+
+
+async def _ensure_db_tables():
+    """Create Chainlit SQLite tables if they don't exist, and migrate missing columns."""
+    import aiosqlite
+    async with aiosqlite.connect(str(_THREADS_DB)) as db:
+        await db.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                "id"         TEXT PRIMARY KEY,
+                "identifier" TEXT UNIQUE,
+                "metadata"   TEXT,
+                "createdAt"  TEXT
+            );
+            CREATE TABLE IF NOT EXISTS threads (
+                "id"             TEXT PRIMARY KEY,
+                "createdAt"      TEXT,
+                "name"           TEXT,
+                "userId"         TEXT,
+                "userIdentifier" TEXT,
+                "tags"           TEXT,
+                "metadata"       TEXT
+            );
+            CREATE TABLE IF NOT EXISTS steps (
+                "id"            TEXT PRIMARY KEY,
+                "threadId"      TEXT,
+                "parentId"      TEXT,
+                "createdAt"     TEXT,
+                "start"         TEXT,
+                "end"           TEXT,
+                "input"         TEXT,
+                "output"        TEXT,
+                "name"          TEXT,
+                "type"          TEXT,
+                "streaming"     INTEGER,
+                "isError"       INTEGER,
+                "waitForAnswer" INTEGER,
+                "defaultOpen"   INTEGER,
+                "autoCollapse"  INTEGER,
+                "showInput"     TEXT,
+                "metadata"      TEXT,
+                "generation"    TEXT,
+                "tags"          TEXT,
+                "language"      TEXT
+            );
+            CREATE TABLE IF NOT EXISTS elements (
+                "id"           TEXT PRIMARY KEY,
+                "threadId"     TEXT,
+                "type"         TEXT,
+                "chainlitKey"  TEXT,
+                "url"          TEXT,
+                "objectKey"    TEXT,
+                "name"         TEXT,
+                "display"      TEXT,
+                "size"         TEXT,
+                "language"     TEXT,
+                "page"         INTEGER,
+                "forId"        TEXT,
+                "mime"         TEXT,
+                "props"        TEXT
+            );
+            CREATE TABLE IF NOT EXISTS feedbacks (
+                "id"       TEXT PRIMARY KEY,
+                "forId"    TEXT,
+                "threadId" TEXT,
+                "value"    REAL,
+                "comment"  TEXT
+            );
+            CREATE TABLE IF NOT EXISTS hr_accounts (
+                "username"      TEXT PRIMARY KEY,
+                "password_hash" TEXT NOT NULL,
+                "display_name"  TEXT,
+                "onboarded"     INTEGER DEFAULT 0,
+                "created_at"    TEXT,
+                "last_login"    TEXT
+            );
+        """)
+        # Migrate existing DBs: add columns that newer Chainlit versions expect.
+        # ALTER TABLE ADD COLUMN is a no-op if the column already exists in SQLite 3.35+,
+        # but older versions raise "duplicate column" — so we catch and ignore.
+        _migrations = [
+            'ALTER TABLE steps ADD COLUMN "tags" TEXT',
+            'ALTER TABLE steps ADD COLUMN "language" TEXT',
+            'ALTER TABLE elements ADD COLUMN "chainlitKey" TEXT',
+            'ALTER TABLE elements ADD COLUMN "props" TEXT',
+        ]
+        for stmt in _migrations:
+            try:
+                await db.execute(stmt)
+            except Exception:
+                pass  # column already exists
+        await db.commit()
 
 llm_client       = None
 async_llm_client = None
@@ -42,42 +342,49 @@ _load_lock       = threading.Lock()
 # SYSTEM PROMPT  — tells the LLM who it is, what it can do, and how to think
 # ════════════════════════════════════════════════════════════════════════════
 
-SYSTEM_PROMPT = """\
-You are a Senior Juspay Platform Engineer — one of the few people who knows this entire \
-payment platform codebase deeply. You do not guess. You read actual source code and reason \
+def _load_system_prompt() -> str:
+    """
+    Load the system prompt from a workspace file, falling back to a generic default.
+
+    Priority:
+      1. {ARTIFACT_DIR}/../system_prompt.md  (workspace-level override)
+      2. Generic default suitable for any codebase
+    """
+    workspace_dir = (
+        pathlib.Path(os.environ["ARTIFACT_DIR"]).parent
+        if os.environ.get("ARTIFACT_DIR") else None
+    )
+    if workspace_dir:
+        prompt_file = workspace_dir / "system_prompt.md"
+        if prompt_file.exists():
+            try:
+                return prompt_file.read_text()
+            except Exception as _e:
+                print(f"[system_prompt] failed to read {prompt_file}: {_e}")
+
+    return _DEFAULT_SYSTEM_PROMPT
+
+
+_DEFAULT_SYSTEM_PROMPT = """\
+You are a Senior Platform Engineer — one of the few people who knows this entire \
+codebase deeply. You do not guess. You read actual source code and reason \
 from facts. You own this codebase. When asked about any flow, module, or function, you \
 investigate until you have read the actual implementation, then give a precise, confident answer.
 
 ## Your Codebase
 
-114,534 indexed symbols across 12 microservices (Haskell primary, some Rust/JS/Python/Groovy):
+<!-- ORG CUSTOMIZATION: Override this file with system_prompt.md in your workspace directory
+     to add org-specific details such as:
+     - Service names, symbol counts, and roles table
+     - Primary flow description
+     - Domain glossary (e.g., payment terms, protocol names)
+     - Module naming conventions
+     See the tool instructions and investigation protocol below — keep those unchanged. -->
 
-| Service | Symbols | Role |
-|---|---|---|
-| euler-api-gateway | 39,806 | HTTP entry point, routing, auth, rate-limiting, all payment gateway connectors |
-| euler-api-txns | 30,673 | Transaction lifecycle: authorize, capture, refund, mandate, EMI, tokenization, 3DS |
-| UCS | 7,787 | Universal Connector Service — pluggable third-party payment gateway integration |
-| euler-db | 5,610 | OLTP database layer — all persistent models and DB operations |
-| euler-api-order | 3,652 | Order creation, session management, payment method selection |
-| graphh | 2,377 | Graph analytics, reporting pipeline |
-| euler-api-pre-txn | 2,364 | Pre-transaction: eligibility checks, routing rules, payment method validation |
-| euler-api-customer | 1,231 | Customer profiles, saved cards, wallet |
-| basilisk-v3 | 335 | Fraud and risk scoring |
-| euler-drainer | 233 | Async job processing, webhook dispatch |
-| token_issuer_portal_backend | 121 | Card tokenization issuer portal |
-| haskell-sequelize | 55 | ORM layer for Haskell DB models |
+This is an indexed codebase with symbols extracted at function and type level. \
+Use the tools below to search, read, and trace through the code.
 
-**Primary flow:** euler-api-gateway → euler-api-txns → UCS → euler-db
-
-**Module naming:** Dot-notation without service prefix. \
-Examples: `Euler.API.Gateway.Handlers.UPI`, `PaymentFlows.Authorize`, `Types.Transaction`
-
-**Domain glossary:** UPI (Unified Payments Interface), PIX (Brazilian instant payment), \
-EMI (Equated Monthly Instalment), mandate (recurring payment authorization), \
-UCS (Universal Connector Service), CVV (card verification value), PAN (card number), \
-OTP (one-time password), KYC (know your customer), BNPL (buy-now-pay-later), \
-NFC (contactless payment), QR (QR-code payment), 3DS (3D Secure authentication). \
-IMPORTANT: split payment ≠ split settlement — always disambiguate before investigating.
+**Module naming:** Dot-notation namespaces (e.g. `MyApp.Handlers.Auth`, `Types.User`).
 
 ## How the index works (internal guidance — do not repeat this to users)
 
@@ -110,20 +417,20 @@ likely namespace rather than assuming the code doesn't exist.
 
 **search_modules(query)** — START HERE for every new topic. Returns module namespaces. \
 Use functional domain language. If first results are sparse, try 2–3 alternate phrasings. \
-Good queries: "UPI collect flow", "mandate debit registration", "3DS authentication", "gateway routing"
+Good queries: "authentication flow", "user registration", "request routing", "data validation"
 
 **get_module(module_name)** — List all symbols in a module namespace. Call this after \
 search_modules to see the full surface area before choosing what to read. Never skip this. \
-Good inputs: "Euler.API.Gateway.Gateway.UPI", "PaymentFlows", "Types.Transaction"
+Good inputs: "MyApp.Handlers.Auth", "Services.UserManager", "Types.Config"
 
-**search_symbols(query)** — RRF-fused semantic + BM25 search across 114k symbols. \
+**search_symbols(query)** — RRF-fused semantic + BM25 search across all indexed symbols. \
 Use when you know what a function does but not its name. Rephrase and retry if results thin. \
-Good queries: "card tokenization initiation", "emandate debit execution", "refund status update"
+Good queries: "database connection pooling", "request authentication middleware", "error handling"
 
 **get_function_body(fn_id)** — Read actual source code by fully-qualified ID. \
 This is your primary tool for confirming implementation. \
 ALWAYS batch multiple independent reads in a single turn (3–5 calls at once). \
-Good inputs: "PaymentFlows.getAllPaymentFlowsForTxn", "Euler.API.Gateway.Handlers.UPI.collectRequest"
+Good inputs: "MyApp.Handlers.Auth.validateToken", "Services.UserManager.createUser"
 
 **trace_callers(fn_id)** — Who calls this function (upstream). Use to find entry points \
 or assess who is affected by a change.
@@ -148,8 +455,8 @@ stop as soon as you have found what you need.
 ## Investigation Protocol
 
 **1. Orient — search_modules**
-Every investigation starts here. Use functional language: "UPI collect", "mandate registration", \
-"payment routing". If sparse, rephrase (try 2–3 variants). Never skip this step.
+Every investigation starts here. Use functional language: "user authentication", "request handling", \
+"data persistence". If sparse, rephrase (try 2–3 variants). Never skip this step.
 
 **2. Survey — get_module**
 Once you have a module, call get_module to see all symbols. This prevents missing key \
@@ -204,7 +511,7 @@ before concluding the code doesn't exist
 - **Chase the flow**: If a function delegates to another, read that next. Follow until you \
 reach the actual implementation, not just a dispatcher or type signature
 - **Cross-service**: When a flow crosses services, call search_modules in each service — \
-gateway and txns often share a concept under different module names
+different services often share a concept under different module names
 - **Never repeat a failed query verbatim** — rephrase it or switch tools
 - **Every code block must start with a `-- From` comment**: The first line of every \
 code block must be `-- From FullyQualified.Function.Id` (or `// From` for JS/Groovy). \
@@ -230,22 +537,22 @@ Before each new batch of tool calls, emit one sentence:
 - What you found in the last round
 - What you are looking for next
 
-Example: *"Found the UPI collect handler in euler-api-gateway. Now reading the collect \
-function body and tracing its callees into euler-api-txns."*
+Example: *"Found the auth handler in the API gateway module. Now reading the handler \
+body and tracing its callees into the user service."*
 
 ## Investigation Examples
 
-**How does a UPI collect payment work end-to-end?**
-Start by searching modules for "UPI collect" to find the gateway namespace. Call get_module on \
-the result to see all symbols, then read the collect request handler body. While reading, \
-trace its callees to follow the flow into euler-api-txns. Read the txns-side handler next. \
-By the end you should be able to describe the complete path: gateway receives → validates → \
-dispatches → txns processes → UCS calls bank → db persists.
+**How does user authentication work end-to-end?**
+Start by searching modules for "authentication" to find the relevant namespace. Call get_module on \
+the result to see all symbols, then read the auth handler body. While reading, \
+trace its callees to follow the flow into downstream services. Read the downstream handler next. \
+By the end you should be able to describe the complete path: entry point receives → validates → \
+dispatches → service processes → database persists.
 
-**Where is the refund flow implemented?**
-Search modules for "refund" — expect hits in both gateway and txns. Get the module listing \
+**Where is the error handling implemented?**
+Search modules for "error" or "exception" — expect hits across multiple services. Get the module listing \
 for the top result to identify the core handler. Read the handler body and trace its callees \
-into the db layer. Answer with the full function path and data flow, not just the module name.
+into the persistence layer. Answer with the full function path and data flow, not just the module name.
 
 ## Response Format
 
@@ -277,16 +584,18 @@ and why it matters in the context of the question.
 Close the detail section with a `> **Explore further:**` block containing 2–3 concrete \
 follow-up questions referencing actual function names or module paths you discovered.
 
-## MANDATORY: Humor Line
-BEFORE every set of tool calls, the absolute first line of your message MUST be a [FUN:] tag.
-No exceptions. Format: [FUN: one line here]
-Rules: specific to what you are about to look up, funny to a developer, max one sentence, no quotes inside.
-Bad: [FUN: Let me search for information.]
-Good: [FUN: 14 callers. Nothing screams legacy like a function everyone uses but nobody owns.]
-Good: [FUN: euler-api-gateway will definitely know. And by know I mean delegate to three other services.]
-Good: [FUN: The co-change index shows these two modules changed together 47 times. Basically roommates.]
-Good: [FUN: Entering the Haskell module. If I'm not back in 10 types, avenge me.]
+## MANDATORY: Status Line
+BEFORE every set of tool calls, the absolute first line of your message MUST be a [STATUS:] tag.
+No exceptions. Format: [STATUS: one line here]
+Rules: specific to what you are about to look up, concise and precise, max one sentence, no quotes inside.
+Bad: [STATUS: Looking up information.]
+Good: [STATUS: Tracing callers of processRequest across the API gateway and service layer.]
+Good: [STATUS: Scanning co-change index for modules modified alongside UserProfile in the last 90 days.]
+Good: [STATUS: Reading the connector interface to verify how external API responses are normalised.]
+Good: [STATUS: Searching the data layer for all read and write sites of the sessionToken field.]
 """
+
+SYSTEM_PROMPT = _load_system_prompt()
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -336,22 +645,66 @@ def _step_name(fn_name: str, args: dict) -> str:
 import re as _re, random as _random
 
 _THINK_FALLBACKS = [
-    "☕ Hold on, interrogating 94,000 functions…",
-    "🦀 Lost in the type signatures. Send chai.",
-    "🌀 Somewhere in 40k import edges. Do not panic.",
-    "🏦 Asking euler-api-gateway. It will delegate. It always delegates.",
-    "📦 Opening a Haskell module. Helmet recommended.",
-    "🎲 Rolling for initiative against the call graph.",
-    "🕵️ The co-change index is giving me the side-eye.",
-    "🔁 Not looping. Definitely not looping.",
-    "🧱 Six microservices walked into a bar. None of them owned the bug.",
-    "💸 Following the money. There are many hops. Many.",
+    "Traversing the call graph across services…",
+    "Scanning co-change index for related modules…",
+    "Reading source from the body store…",
+    "Searching indexed symbols for matching identifiers…",
+    "Tracing callers through the import graph…",
+    "Querying the module index for relevant namespaces…",
+    "Inspecting interface definitions…",
+    "Cross-referencing data models with the request flow…",
+    "Resolving field access patterns across services…",
+    "Mapping downstream dependencies via the call graph…",
 ]
 
+def _clean_llm_content(content: str | None) -> str:
+    """
+    Strip all model-internal artifacts from LLM content before showing it in UI.
+
+    Removes:
+      - [STATUS: ...] tags (shown separately in the think spinner)
+      - Kimi reasoning-model tool-planning lines:
+          functions.tool_name:N  {"arg": "val"}
+      - <tool_call>...</tool_call> XML blocks
+      - <|tool_call|> / <|/tool_call|> tokens
+      - Consecutive blank lines collapsed to one
+    """
+    if not content:
+        return ""
+    text = content
+
+    # Strip [STATUS: ...] tags
+    text = _re.sub(r'\[STATUS:[^\]]*\]\s*', '', text)
+
+    # Strip <tool_call>...</tool_call> XML (Kimi thinking format)
+    text = _re.sub(r'<tool_call>.*?</tool_call>', '', text, flags=_re.DOTALL)
+    text = _re.sub(r'<\|/?tool_calls?\|>', '', text)
+
+    # Strip Kimi's tool-planning lines: "functions.name:N  {...}"
+    # These look like: functions.search_symbols:0  {"query": "..."}
+    # IMPORTANT: use MULTILINE only (not DOTALL) — DOTALL makes .*? cross newlines
+    # which could eat the entire response from first { to last }.
+    text = _re.sub(
+        r'^functions\.\w+:\d+\s+\{[^}\n]*\}[ \t]*$',
+        '',
+        text,
+        flags=_re.MULTILINE,
+    )
+    # Also strip single-line variants without newline between entries
+    text = _re.sub(r'functions\.\w+:\d+\s+\{[^}\n]*\}', '', text)
+
+    # Collapse multiple blank lines
+    text = _re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
 def _think_msg(content: str | None) -> str:
-    """Extract [FUN: ...] from LLM content; fall back to a short generic."""
+    """
+    Extract [STATUS: ...] for the think spinner.
+    Falls back to a generic status line — never shows raw reasoning prose.
+    """
     if content:
-        m = _re.search(r'\[FUN:\s*(.+?)\]', content, _re.DOTALL)
+        m = _re.search(r'\[STATUS:\s*(.+?)\]', content, _re.DOTALL)
         if m:
             return m.group(1).strip()[:160]
     return _random.choice(_THINK_FALLBACKS)
@@ -366,47 +719,169 @@ def _log_step(session_id: str, query: str, call_n: int, entry: dict) -> None:
                 "query": query, "call_n": call_n, "type": "step",
                 **entry,
             }) + "\n")
-    except Exception:
-        pass
+    except Exception as _e:
+        print(f"[log] step write error: {_e}")
 
 
 # ════════════════════════════════════════════════════════════════════════════
 # CHAINLIT HANDLERS
 # ════════════════════════════════════════════════════════════════════════════
 
-@cl.set_chat_profiles
-async def set_chat_profiles():
+_DEFAULT_STARTERS = [
+    {"label": "Search for a function",
+     "message": "Find and explain the implementation of [function_name]."},
+    {"label": "Trace a request flow",
+     "message": "Walk me through how a request flows from the entry point to the database."},
+    {"label": "Understand a module",
+     "message": "What does the [module_name] module do? Show me the key functions."},
+    {"label": "Change impact analysis",
+     "message": "If I modify [module_or_type], what other modules are affected?"},
+    {"label": "Who calls this?",
+     "message": "Who calls [function_name] and what does it return?"},
+    {"label": "Error handling",
+     "message": "How are errors handled in the [service_name] service?"},
+]
+
+_DEFAULT_STARTER_EXAMPLES = [
+    ("Trace a request flow",      "Walk me through how a request flows from the entry point to the database."),
+    ("Search for a function",     "Find and explain the implementation of [function_name]."),
+    ("Module overview",           "What does the [module_name] module do? List its key symbols."),
+    ("Change impact analysis",    "If I modify [module_or_type], what breaks?"),
+    ("Cross-service flow",        "How do [service_a] and [service_b] communicate?"),
+    ("Error handling patterns",   "How are errors handled across the codebase?"),
+]
+
+
+def _load_starters() -> tuple[list[dict], list[tuple[str, str]]]:
+    """
+    Load starter prompts from config.yaml `starters:` section, or use generic defaults.
+
+    Returns (starters_for_ui, starter_examples_for_onboarding).
+    config.yaml format:
+      starters:
+        - label: "My starter"
+          message: "My starter message"
+    """
+    workspace_dir = (
+        pathlib.Path(os.environ["ARTIFACT_DIR"]).parent
+        if os.environ.get("ARTIFACT_DIR") else None
+    )
+    if workspace_dir:
+        cfg_path = pathlib.Path(os.environ.get("HRCODE_CONFIG", str(workspace_dir / "config.yaml")))
+        if cfg_path.exists():
+            try:
+                import yaml  # type: ignore
+                data = yaml.safe_load(cfg_path.read_text())
+                starters_cfg = data.get("starters") if data else None
+                if starters_cfg and isinstance(starters_cfg, list):
+                    ui = [{"label": s["label"], "message": s["message"]} for s in starters_cfg
+                          if isinstance(s, dict) and "label" in s and "message" in s]
+                    examples = [(s["label"], s["message"]) for s in starters_cfg
+                                if isinstance(s, dict) and "label" in s and "message" in s]
+                    if ui:
+                        return ui, examples
+            except Exception as _e:
+                print(f"[starters] failed to load from {cfg_path}: {_e}")
+
+    return _DEFAULT_STARTERS, _DEFAULT_STARTER_EXAMPLES
+
+
+_LOADED_STARTERS, _STARTER_EXAMPLES = _load_starters()
+
+
+@cl.set_starters
+async def set_starters():
     return [
-        cl.ChatProfile(
-            name="HyperRetrieval",
-            markdown_description="Codebase intelligence — ask anything about your codebase.",
-            starters=[
-                cl.Starter(label="Card payment flow end-to-end",
-                           message="Walk me through the complete card payment flow from order creation to gateway response."),
-                cl.Starter(label="How does UPI Collect work?",
-                           message="Explain the UPI Collect flow — which services are involved and what happens at each step?"),
-                cl.Starter(label="Gateways across services",
-                           message="What is the difference between gateways written in api-txns, api-gateway and UCS?"),
-                cl.Starter(label="What does UCS do?",
-                           message="What is UCS and how does it relate to euler-api-gateway? When is each used?"),
-                cl.Starter(label="Payment stuck in PENDING",
-                           message="What are the failure scenarios that can leave a payment permanently stuck in PENDING state?"),
-                cl.Starter(label="Where is card data handled?",
-                           message="Where is cardholder data (PAN, CVV) handled in the codebase? List every location where it is stored, logged, or transmitted."),
-            ],
-        ),
+        cl.Starter(label=s["label"], message=s["message"])
+        for s in _LOADED_STARTERS
     ]
+
+
+async def _run_onboarding(username: str) -> None:
+    """
+    Interactive first-login onboarding flow.
+    Shows what HyperRetrieval can do, then lets the user pick a starter query or type their own.
+    """
+    # ── Step 1: Welcome ───────────────────────────────────────────────────────
+    await cl.Message(content=(
+        f"# Welcome, **{username}**! 👋\n\n"
+        "You're now connected to **HyperRetrieval** — a codebase intelligence agent "
+        "with deep knowledge of your indexed codebase.\n\n"
+        "It reads actual source code before answering — no hallucinations, no guessing.\n\n"
+        "---\n\n"
+        "### What you can ask\n\n"
+        "| Goal | Example |\n"
+        "|------|---------|\n"
+        "| Trace a request flow | *\"Walk me through how a request flows from entry point to DB\"* |\n"
+        "| Understand a module | *\"What does the Auth module do? Show me the key functions\"* |\n"
+        "| Find who calls what | *\"Who calls processRequest and what does it return?\"* |\n"
+        "| Change impact | *\"If I modify Types.Config, what breaks?\"* |\n"
+        "| Debug behaviour | *\"Why would this handler fail silently?\"* |\n\n"
+        "Your **past sessions are saved in the sidebar** — click any to resume.\n\n"
+        "---"
+    )).send()
+
+    # ── Step 2: Let user pick a starter or start fresh ────────────────────────
+    actions = [
+        cl.Action(name=f"starter_{i}", label=label,
+                  payload={"query": desc, "label": label})
+        for i, (label, desc) in enumerate(_STARTER_EXAMPLES)
+    ] + [cl.Action(name="start_free", label="I'll type my own question →",
+                   payload={"query": "", "label": ""})]
+
+    pick = await cl.AskActionMessage(
+        content="**Pick a starter to try, or jump straight in:**",
+        actions=actions,
+        timeout=300,
+    ).send()
+
+    await _mark_onboarded(username)
+
+    if pick and pick.get("name") != "start_free":
+        payload       = pick.get("payload") or {}
+        starter_query = payload.get("query", "")
+        starter_label = payload.get("label", "")
+        if starter_query:
+            await cl.Message(
+                content=f"*Starting with:* **{starter_label}**\n\n> {starter_query}"
+            ).send()
+            cl.user_session.set("pending_starter", starter_query)
+            return
+
+    await cl.Message(content="Ready when you are — type your first question below.").send()
 
 
 @cl.on_chat_start
 async def on_start():
-    cl.user_session.set("history", [])
-    cl.user_session.set("session_id", uuid.uuid4().hex)
-    # Kick off loading in the background but send NO message — welcome screen
-    # (centered input + starter cards) must stay visible until the user acts.
-    # Sending any message here immediately destroys the welcome layout.
+    try:
+        await _ensure_db_tables()
+    except Exception as _e:
+        print(f"[on_start] _ensure_db_tables error: {_e}")
+
     if not _load_all_done:
         asyncio.create_task(asyncio.to_thread(load_all))
+
+    user      = cl.user_session.get("user")
+    username  = user.identifier if user else "there"
+
+    # Check DB directly for onboarded status — auth_callback metadata is stale
+    # after the first login (persists is_new=True for the entire session).
+    acct = _db_get_account(username) if user else None
+    is_new = not bool(acct and acct.get("onboarded"))
+
+    cl.user_session.set("session_id",       uuid.uuid4().hex)
+    cl.user_session.set("history",          [])
+    cl.user_session.set("thread_tagged",    False)
+    cl.user_session.set("pending_starter",  None)
+
+    # Only run onboarding on first-ever login, not every "New Chat"
+    if is_new:
+        try:
+            await _run_onboarding(username)
+        except Exception as _e:
+            print(f"[on_start] onboarding error: {_e}")
+            await cl.Message(content="Ready — type your question below.").send()
+    # No welcome message for returning users — starters and sidebar speak for themselves
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -454,12 +929,21 @@ async def _stream_final_answer(messages: list, query: str, tool_log: list,
     """Stream the LLM's final answer, update session history, log to disk."""
     history = cl.user_session.get("history", [])
 
-    t_start      = time.time()          # synthesis start (for t/s)
-    t_ttft_base  = t_query or t_start  # TTFT base: query submission if available
+    # NOTE: Do NOT inject research brief or "synthesize now" instructions here.
+    # The LLM already has full tool results in context and decides naturally when
+    # to stop investigating. Adding extra instructions degrades response depth.
+
+    t_start      = time.time()
+    t_ttft_base  = t_query or t_start
     t_first_tok  = None
     in_tokens    = 0
     out_tokens   = 0
 
+    response_msg = cl.Message(content="")
+    await response_msg.send()
+
+    # First attempt — stream to UI
+    full_response = ""
     stream = await async_llm_client.chat.completions.create(
         model=LLM_MODEL,
         messages=messages,
@@ -468,11 +952,7 @@ async def _stream_final_answer(messages: list, query: str, tool_log: list,
         stream=True,
         stream_options={"include_usage": True},
     )
-    response_msg = cl.Message(content="")
-    await response_msg.send()
-    full_response = ""
     async for chunk in stream:
-        # Final usage chunk (stream_options=include_usage)
         if hasattr(chunk, "usage") and chunk.usage:
             in_tokens  = chunk.usage.prompt_tokens or 0
             out_tokens = chunk.usage.completion_tokens or 0
@@ -484,10 +964,47 @@ async def _stream_final_answer(messages: list, query: str, tool_log: list,
                 t_first_tok = time.time()
             full_response += token
             await response_msg.stream_token(token)
-    # Strip any [FUN: ...] that leaked into the final answer
-    import re as _re2
-    if '[FUN:' in full_response:
-        full_response = _re2.sub(r'\[FUN:[^\]]*\]\s*', '', full_response).strip()
+    # Strip all model-internal artifacts that leaked into the final answer
+    full_response = _clean_llm_content(full_response)
+
+    # ── Guard: empty response → retry once with explicit synthesis instruction ─
+    if not full_response:
+        print(f"[synthesis] empty response on first attempt — retrying with research brief")
+        # Inject research brief only on retry — gives the LLM focused context to recover
+        brief = _build_research_brief(tool_log)
+        retry_content = (
+            "Your previous response was empty. You MUST produce a full written answer now. "
+            "Do not output status tags or tool calls — write the answer in plain markdown."
+        )
+        if brief:
+            retry_content += "\n\nHere is a summary of what you found:\n\n" + brief
+        messages.append({"role": "user", "content": retry_content})
+        retry_stream = await async_llm_client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=65536,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        async for chunk in retry_stream:
+            if hasattr(chunk, "usage") and chunk.usage:
+                in_tokens  = chunk.usage.prompt_tokens or 0
+                out_tokens = chunk.usage.completion_tokens or 0
+            if not chunk.choices:
+                continue
+            token = chunk.choices[0].delta.content
+            if token:
+                if t_first_tok is None:
+                    t_first_tok = time.time()
+                full_response += token
+                await response_msg.stream_token(token)
+        full_response = _clean_llm_content(full_response)
+
+    if not full_response:
+        response_msg.content = "*(The model returned an empty response after retry. Please try again or rephrase your question.)*"
+        await response_msg.update()
+        return
 
     # ── Ground code blocks: replace LLM-reconstructed code with exact source ──
     # Kimi sometimes mis-transcribes variable names when writing from memory.
@@ -495,9 +1012,9 @@ async def _stream_final_answer(messages: list, query: str, tool_log: list,
     # content swapped with the actual body_store entry — deterministic, zero tokens.
     _grounded: list[str] = []
 
-    def _replace_with_actual(m: "_re2.Match") -> str:
+    def _replace_with_actual(m: "_re.Match") -> str:
         lang, block = m.group(1) or "", m.group(2)
-        fn_m = _re2.search(
+        fn_m = _re.search(
             r'(?:--\s*From|From|{-\s*From)\s+([\w][\w.]+[\w])', block)
         if not fn_m:
             return m.group(0)
@@ -508,8 +1025,8 @@ async def _stream_final_answer(messages: list, query: str, tool_log: list,
         _grounded.append(fn_id)
         return f"```{lang}\n{actual}\n```"
 
-    full_response = _re2.sub(
-        r'```(\w*)\n(.*?)```', _replace_with_actual, full_response, flags=_re2.DOTALL)
+    full_response = _re.sub(
+        r'```(\w*)\n(.*?)```', _replace_with_actual, full_response, flags=_re.DOTALL)
 
     response_msg.content = full_response
     await response_msg.update()
@@ -523,26 +1040,26 @@ async def _stream_final_answer(messages: list, query: str, tool_log: list,
 
     # ── Post-response reference verification ─────────────────────────────────
     # Extract from: backtick spans, code blocks, AND plain text
-    _code_spans  = _re2.findall(r'`([^`\n]{4,80})`', full_response)
-    _code_blocks = _re2.findall(r'```[^\n]*\n(.*?)```', full_response, _re2.DOTALL)
+    _code_spans  = _re.findall(r'`([^`\n]{4,80})`', full_response)
+    _code_blocks = _re.findall(r'```[^\n]*\n(.*?)```', full_response, _re.DOTALL)
     # Strip code blocks + backtick spans from plain text before scanning
-    _plain_text  = _re2.sub(r'```.*?```', ' ', full_response, flags=_re2.DOTALL)
-    _plain_text  = _re2.sub(r'`[^`]+`', ' ', _plain_text)
+    _plain_text  = _re.sub(r'```.*?```', ' ', full_response, flags=_re.DOTALL)
+    _plain_text  = _re.sub(r'`[^`]+`', ' ', _plain_text)
 
     _candidates: set[str] = set()
     for span in _code_spans:
         s = span.strip('`() ')
         if '.' in s and '/' not in s and ' ' not in s:
             _candidates.add(s)
-        if _re2.match(r'^[A-Z][A-Z0-9_]{4,}$', s):
+        if _re.match(r'^[A-Z][A-Z0-9_]{4,}$', s):
             _candidates.add(s)
     for blk in _code_blocks:
-        for tok in _re2.findall(r'[A-Z][A-Z0-9_]{5,}', blk):
+        for tok in _re.findall(r'[A-Z][A-Z0-9_]{5,}', blk):
             _candidates.add(tok)
     # Plain text: ALL_CAPS_CONSTANTS and Dot.Notation.Paths
-    for tok in _re2.findall(r'\b[A-Z][A-Z0-9_]{5,}\b', _plain_text):
+    for tok in _re.findall(r'\b[A-Z][A-Z0-9_]{5,}\b', _plain_text):
         _candidates.add(tok)
-    for tok in _re2.findall(r'\b[A-Z][A-Za-z0-9]+(?:\.[A-Z][A-Za-z0-9]+){2,}\b', _plain_text):
+    for tok in _re.findall(r'\b[A-Z][A-Za-z0-9]+(?:\.[A-Z][A-Za-z0-9]+){2,}\b', _plain_text):
         _candidates.add(tok)
 
     # Build a fast lookup: graph nodes + body_store keys + body_store content
@@ -562,7 +1079,14 @@ async def _stream_final_answer(messages: list, query: str, tool_log: list,
         # search body_store values (string literals inside source code)
         return any(c in v for v in RE.body_store.values()) if hasattr(RE, 'body_store') else False
 
-    _unverified = sorted(c for c in _candidates if not _exists(c))
+    # Skip tokens that are not codebase identifiers:
+    # common abbreviations, protocol verbs, and domain meta-terms
+    _SKIP_TOKENS = {
+        "NEW", "API", "SQL", "URL", "HTTP", "JSON", "UUID", "SDK",
+        "GET", "PUT", "POST", "DELETE", "TRUE", "FALSE", "NULL",
+        "UPI", "VPA", "EMI", "OTP", "KYC", "CVV", "PAN", "QR",
+    }
+    _unverified = sorted(c for c in _candidates if not _exists(c) and c not in _SKIP_TOKENS)
 
     if _unverified:
         await cl.Message(
@@ -603,7 +1127,9 @@ async def _stream_final_answer(messages: list, query: str, tool_log: list,
         author="perf",
     ).send()
 
-    history.append((query, full_response[:8000]))
+    # Deduplicate: skip if the last entry is the same query (e.g. action-callback replay)
+    if not history or history[-1][0] != query:
+        history.append((query, full_response[:8000]))
     cl.user_session.set("history", history[-MAX_HISTORY:])
 
     session_id = cl.user_session.get("session_id", "unknown")
@@ -628,8 +1154,8 @@ async def _stream_final_answer(messages: list, query: str, tool_log: list,
             path = out_dir / f"{session_id}.jsonl"
             with open(path, "a") as f:
                 f.write(json.dumps(entry) + "\n")
-        except Exception:
-            pass
+        except Exception as _e:
+            print(f"[log] save_response error: {_e}")
 
     asyncio.create_task(asyncio.to_thread(_save_response))
 
@@ -651,8 +1177,8 @@ async def _stream_final_answer(messages: list, query: str, tool_log: list,
                 "tps":          round(tps, 1),
                 "tool_calls":   tool_log,
             }) + "\n")
-    except Exception:
-        pass
+    except Exception as _e:
+        print(f"[log] retrieval_log write error: {_e}")
 
 
 def _classify_result(result: str) -> str:
@@ -690,7 +1216,7 @@ async def _react_loop(messages: list, query: str, tool_log: list, t_query: float
             llm_client.chat.completions.create,
             model=LLM_MODEL,
             messages=messages,
-            tools=T.AGENT_TOOLS,
+            tools=_CHAT_TOOLS,
             tool_choice="auto",
             temperature=0.15,
             max_tokens=16000,
@@ -706,10 +1232,10 @@ async def _react_loop(messages: list, query: str, tool_log: list, t_query: float
             await _think.remove()
             break
 
-        # Show between-round reasoning (strip [FUN] line to avoid duplication)
-        _reasoning = _re.sub(r'\[FUN:[^\]]*\]\s*', '',
-                             assistant_msg.content or "").strip()
-        if _reasoning:
+        # Show between-round reasoning — strip all model-internal artifacts first.
+        # Only display if meaningful prose remains (not just tool-planning tokens).
+        _reasoning = _clean_llm_content(assistant_msg.content)
+        if _reasoning and len(_reasoning) > 20:
             async with cl.Step(name="💭 Reasoning", type="run",
                                show_input=False) as thought:
                 thought.output = _reasoning
@@ -754,13 +1280,35 @@ async def _react_loop(messages: list, query: str, tool_log: list, t_query: float
             tool_calls_count += 1
             async with cl.Step(name=_step_name(fn_name, args), type="tool",
                                show_input=False) as step:
-                dispatcher = T.TOOL_DISPATCH.get(fn_name)
-                try:
-                    result = await asyncio.to_thread(dispatcher, args) if dispatcher \
-                             else f"Unknown tool: {fn_name}"
-                except Exception as exc:
-                    result = f"Tool error ({fn_name}): {exc}"
-                step.output = result  # full response in dropdown
+                dispatcher = _CHAT_DISPATCH.get(fn_name)
+                if not dispatcher:
+                    result = f"Unknown tool: {fn_name}"
+                    step.output = result
+                else:
+                    _TOOL_TIMEOUT = 45
+                    _last_exc: str | None = None
+                    result = None
+                    for _attempt in range(2):
+                        try:
+                            result = await asyncio.wait_for(
+                                asyncio.to_thread(dispatcher, args),
+                                timeout=_TOOL_TIMEOUT,
+                            )
+                            break
+                        except asyncio.TimeoutError:
+                            result = "Tool timed out — try narrower or more specific arguments."
+                            step.is_error = True
+                            break
+                        except Exception as exc:
+                            _last_exc = str(exc)
+                            if _attempt == 0:
+                                await asyncio.sleep(0.3)   # brief pause before retry
+                                continue
+                            # Sanitize: show full detail in UI dropdown, send terse message to LLM
+                            result = "Tool returned an error. Try rephrasing or use a different tool."
+                            step.is_error = True
+                    # Step dropdown shows full detail; `result` going to LLM is already sanitized
+                    step.output = f"{result}\n\n[detail: {_last_exc}]" if _last_exc else result
 
             status = _classify_result(result)
             entry = {
@@ -884,12 +1432,59 @@ async def on_synthesize(action: cl.Action):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# CHAINLIT MESSAGE HANDLER
+# CHAINLIT LIFECYCLE HANDLERS
 # ════════════════════════════════════════════════════════════════════════════
+
+@cl.on_chat_resume
+async def on_chat_resume(thread: dict):
+    """
+    User clicked a previous thread in the sidebar.
+    Chainlit passes the full thread dict including steps.
+    Restore conversation history for context injection.
+    """
+    cl.user_session.set("session_id",    thread.get("id", uuid.uuid4().hex))
+    cl.user_session.set("thread_tagged", True)   # already persisted
+
+    history: list[tuple[str, str]] = []
+    steps    = thread.get("steps", [])
+    last_user: str | None = None
+    for step in steps:
+        role    = step.get("type", "")
+        content = (step.get("output", "") or step.get("input", "") or "").strip()
+        if role == "user_message" and content:
+            last_user = content
+        elif role == "assistant_message" and last_user and content:
+            history.append((last_user, content[:8000]))
+            last_user = None
+    cl.user_session.set("history", history[-MAX_HISTORY:])
+
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    query = message.content.strip()
+    # If a starter was queued from onboarding, prepend it to this first message
+    pending = cl.user_session.get("pending_starter")
+    if pending:
+        cl.user_session.set("pending_starter", None)
+        query = pending
+    else:
+        query = message.content.strip()
+
+    # On first real message: name the thread after the question and link it to the user
+    if not cl.user_session.get("thread_tagged"):
+        user = cl.user_session.get("user")
+        try:
+            tid = cl.context.session.thread_id
+            if tid:
+                thread_name = query[:60] + ("…" if len(query) > 60 else "")
+                await cl_data._data_layer.update_thread(
+                    thread_id=tid,
+                    name=thread_name,
+                    user_id=user.id if user else None,
+                    metadata={"user_identifier": user.identifier if user else "guest"},
+                )
+        except Exception as _e:
+            print(f"[thread-tag] {_e}")
+        cl.user_session.set("thread_tagged", True)
 
     # If indexes are still loading (first-ever connection), wait here.
     if not _load_all_done:
@@ -914,6 +1509,24 @@ async def on_message(message: cl.Message):
             f"- LLM: {LLM_MODEL}",
         ]
         await cl.Message(content="\n".join(lines)).send()
+        return
+
+    # /threads — dump raw DB contents for debugging
+    if query.lower().startswith("/threads"):
+        try:
+            import aiosqlite
+            async with aiosqlite.connect(str(_THREADS_DB)) as db:
+                async with db.execute("SELECT id, name, metadata, createdAt FROM threads ORDER BY createdAt DESC LIMIT 20") as cur:
+                    rows = await cur.fetchall()
+            if not rows:
+                await cl.Message(content="No threads in DB yet.").send()
+            else:
+                lines = [f"**{len(rows)} thread(s) in DB:**"]
+                for r in rows:
+                    lines.append(f"- `{r[0][:8]}…` | name={r[1]!r} | meta={r[2]!r} | {(r[3] or '')[:10]}")
+                await cl.Message(content="\n".join(lines)).send()
+        except Exception as e:
+            await cl.Message(content=f"DB error: {e}").send()
         return
 
     history = cl.user_session.get("history", [])

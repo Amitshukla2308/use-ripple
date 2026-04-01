@@ -115,6 +115,29 @@ kw_allowlist:
   - bnpl   # buy now pay later
   # Add your own domain terms here
 
+# Customization
+branding:
+  app_name: "HyperRetrieval"
+  tagline: "codebase intelligence"
+
+starters:
+  - label: "Search for a function"
+    message: "Find and explain the implementation of [function_name]"
+  - label: "Trace a call chain"
+    message: "Who calls [function_name] and what does it do?"
+  - label: "Module overview"
+    message: "What are the key functions in [module_name]?"
+  - label: "Change impact"
+    message: "What would break if I modify [file_or_module]?"
+
+# Custom system prompt (optional)
+# Place a system_prompt.md file in your workspace directory for full customization.
+# Or set these fields for quick customization:
+prompt:
+  org_name: "Your Organization"
+  role: "Senior Platform Engineer"
+  # domain_glossary: "term1 (definition), term2 (definition)"
+
 # ── Persona overrides (optional) ────────────────────────────────────────────
 # Uncomment and edit to customize for your codebase:
 #

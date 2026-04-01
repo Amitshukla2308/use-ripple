@@ -24,7 +24,7 @@ ARTIFACT_DIR.mkdir(exist_ok=True)
 
 API_KEY  = os.environ.get("LLM_API_KEY",  "")
 BASE_URL = os.environ.get("LLM_BASE_URL", "")
-MODEL    = os.environ.get("LLM_MODEL",    "reasoning-large-model")
+MODEL    = os.environ.get("LLM_MODEL",    "kimi-latest")
 
 MAX_NODES_PER_CLUSTER = int(os.environ.get("MAX_NODES_PER_CLUSTER", "80"))
 MIN_CLUSTER_SIZE      = int(os.environ.get("MIN_CLUSTER_SIZE", "100"))

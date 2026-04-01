@@ -23,7 +23,25 @@ import argparse, json, os, pathlib, sys
 _REPO = pathlib.Path(__file__).parent.parent.parent   # apps/cli → apps → repo root
 sys.path.insert(0, str(_REPO / "serve"))              # for retrieval_engine.py
 sys.path.insert(0, str(_REPO))                        # for tools.py (if needed)
-import retrieval_engine as RE
+
+# Lazy import — RE may not be available if serve/ deps are absent or not initialized
+_RE_AVAILABLE = False
+RE = None
+try:
+    import retrieval_engine as RE  # type: ignore
+    _RE_AVAILABLE = True
+except ImportError as _re_import_err:
+    pass  # RE stays None; functions check _RE_AVAILABLE before calling RE methods
+
+
+def _require_re(feature: str = "this feature") -> None:
+    """Raise a clear error if retrieval_engine isn't available."""
+    if not _RE_AVAILABLE:
+        raise RuntimeError(
+            f"retrieval_engine is required for {feature} but could not be imported. "
+            "Ensure serve/ is on sys.path and retrieval_engine.py dependencies are installed. "
+            "Run: pip install lancedb networkx"
+        )
 
 # ── Security heuristics ───────────────────────────────────────────────────────
 _SECURITY_KEYWORDS = {
@@ -113,8 +131,9 @@ def main():
     )
     parser.add_argument("--files",    nargs="+", help="Explicit changed file paths")
     parser.add_argument("--explain",  action="store_true", help="Add LLM explanation (~30s)")
+    _persona_choices = list(RE.PERSONA_LABELS) if _RE_AVAILABLE else ["reliability_engineer", "security_engineer", "performance_engineer"]
     parser.add_argument("--persona",  default="reliability_engineer",
-                        choices=list(RE.PERSONA_LABELS), help="Persona for --explain")
+                        choices=_persona_choices, help="Persona for --explain")
     parser.add_argument("--format",   choices=["text","json"], default="text")
     parser.add_argument("--check",    choices=["security"],
                         help="Exit non-zero when check fails")
@@ -134,6 +153,7 @@ def main():
         sys.exit(1)
 
     print(f"Analyzing {len(files)} changed file(s)...", file=sys.stderr)
+    _require_re("blast-radius analysis")
 
     artifact_dir = pathlib.Path(args.artifact_dir) if args.artifact_dir else None
     RE.initialize(

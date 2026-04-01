@@ -9,6 +9,33 @@ This is where you add, remove, or modify tools for your deployment.
 import sys, json, os, re, hashlib, threading
 import pathlib
 
+# ── HyperCode coding tools (apps/cli/tools/) ─────────────────────────────────
+# Allows the Chainlit chat + MCP server to use the same coding tools as the CLI.
+_CLI_TOOLS = pathlib.Path(__file__).parent / "apps" / "cli" / "tools"
+# Load CLI tools by explicit file path to avoid circular `import tools` collision
+# (root tools.py is already `tools` in sys.modules when the chat app loads us).
+try:
+    import importlib.util as _ilu
+
+    def _load_cli_module(name: str, filepath: pathlib.Path):
+        spec = _ilu.spec_from_file_location(name, str(filepath))
+        mod  = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    _bash_mod = _load_cli_module("_hr_bash_tool",  _CLI_TOOLS / "bash_tool.py")
+    _file_mod = _load_cli_module("_hr_file_tools", _CLI_TOOLS / "file_tools.py")
+    _run_bash   = _bash_mod.run_bash
+    _read_file  = _file_mod.read_file
+    _write_file = _file_mod.write_file
+    _edit_file  = _file_mod.edit_file
+    _glob_files = _file_mod.glob_files
+    _grep_files = _file_mod.grep_files
+    _CODING_TOOLS_AVAILABLE = True
+except Exception as _e:
+    _CODING_TOOLS_AVAILABLE = False
+    print(f"[tools] CLI tools not available: {_e}")
+
 # ── Context chunk cache ───────────────────────────────────────────────────────
 _CTX_CACHE: dict[str, list[str]] = {}
 _CTX_LOCK   = threading.Lock()
@@ -131,12 +158,12 @@ _DEFAULT_FRAMEWORK = (
     + "\n\n" + _MERMAID_INSTRUCTION
 )
 
-# Single-entry dicts — all keys point to the one Juspay-code identity
+# Single-entry dicts — all keys point to the default identity
 PERSONA_SYSTEM_PROMPTS: dict = {
     "default": _DEFAULT_SYSTEM_PROMPT,
 }
 PERSONA_FRAMEWORKS: dict = {
-    "juspay_code": _DEFAULT_FRAMEWORK,
+    "default": _DEFAULT_FRAMEWORK,
 }
 PERSONA_LABELS: dict = {
     "default": "Codebase Expert",
@@ -377,6 +404,97 @@ AGENT_TOOLS = [
             "token": {"type": "string", "description": "The token returned by get_context."},
             "part":  {"type": "integer", "description": "The part number to retrieve (2 or 3)."},
         }, "required": ["token", "part"]}
+    }},
+
+    # ── HyperCode coding tools ────────────────────────────────────────────────
+    # Enabled when apps/cli/tools/ is importable (_CODING_TOOLS_AVAILABLE = True).
+    # These allow the Chainlit chat + MCP server to read/write/edit files and run
+    # shell commands — full codetoolcli parity in the chat interface.
+
+    {"type": "function", "function": {
+        "name": "run_bash",
+        "description": (
+            "Execute a shell command and return its output.\n\n"
+            "Use for: git operations, running scripts/tests/builds, checking system state.\n"
+            "Rules:\n"
+            "- Prefer non-interactive commands (avoid prompts)\n"
+            "- For file reading prefer read_file (preserves line numbers)\n"
+            "- Explain destructive operations before running them"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "command": {"type": "string", "description": "Shell command to execute."},
+            "timeout": {"type": "integer", "description": "Timeout in seconds (default 120)."},
+        }, "required": ["command"]},
+    }},
+
+    {"type": "function", "function": {
+        "name": "read_file",
+        "description": (
+            "Read a file with line numbers.\n\n"
+            "Always read before editing — edit_file requires knowing the exact content. "
+            "Use offset + limit to read a section of a large file."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "file_path": {"type": "string", "description": "File path (absolute or relative to cwd)."},
+            "offset":    {"type": "integer", "description": "1-based start line (default: 1)."},
+            "limit":     {"type": "integer", "description": "Max lines to return (default: 2000)."},
+        }, "required": ["file_path"]},
+    }},
+
+    {"type": "function", "function": {
+        "name": "write_file",
+        "description": (
+            "Write content to a file (creates or fully overwrites).\n\n"
+            "For targeted changes to existing files, prefer edit_file."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "file_path": {"type": "string", "description": "Destination file path."},
+            "content":   {"type": "string", "description": "Full file content to write."},
+        }, "required": ["file_path", "content"]},
+    }},
+
+    {"type": "function", "function": {
+        "name": "edit_file",
+        "description": (
+            "Replace an exact string in a file.\n\n"
+            "old_string must appear verbatim and be unique — add surrounding lines for context. "
+            "Use replace_all=true to rename across the whole file."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "file_path":   {"type": "string", "description": "File to edit."},
+            "old_string":  {"type": "string", "description": "Exact text to replace (must be unique in file)."},
+            "new_string":  {"type": "string", "description": "Replacement text."},
+            "replace_all": {"type": "boolean", "description": "Replace all occurrences (default false)."},
+        }, "required": ["file_path", "old_string", "new_string"]},
+    }},
+
+    {"type": "function", "function": {
+        "name": "glob_files",
+        "description": (
+            "Find files by glob pattern (supports **). "
+            "Returns paths sorted by modification time.\n"
+            "Examples: 'src/**/*.py', 'tests/test_*.py'"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "pattern": {"type": "string", "description": "Glob pattern."},
+            "path":    {"type": "string", "description": "Base directory (default: repo root)."},
+        }, "required": ["pattern"]},
+    }},
+
+    {"type": "function", "function": {
+        "name": "grep_files",
+        "description": (
+            "Search file contents for a regex pattern. Returns file:line matches.\n"
+            "Uses ripgrep when available. "
+            "Examples: grep_files('def.*payment'), grep_files('TODO', file_glob='*.py')"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "pattern":          {"type": "string", "description": "Regex pattern."},
+            "path":             {"type": "string", "description": "Directory to search (default: repo root)."},
+            "file_glob":        {"type": "string", "description": "Restrict to files matching this glob."},
+            "case_insensitive": {"type": "boolean", "description": "Case-insensitive match (default false)."},
+            "context_lines":    {"type": "integer", "description": "Context lines around matches (default 0)."},
+        }, "required": ["pattern"]},
     }},
 ]
 
@@ -867,6 +985,27 @@ TOOL_DISPATCH: dict = {
     "search_docs":           lambda a: tool_search_docs(a.get("query",""), a.get("tags",[])),
     "get_gateway_integrity": lambda a: tool_get_gateway_integrity(a.get("gateway_name","")),
     "get_type_definition":   lambda a: tool_get_type_definition(a.get("type_name",""), a.get("service","")),
+    # ── HyperCode coding tools (available when _CODING_TOOLS_AVAILABLE) ───────
+    "run_bash":   lambda a: (
+        _run_bash(a.get("command",""), a.get("timeout"), None)
+        if _CODING_TOOLS_AVAILABLE else "run_bash not available (apps/cli/tools not found)"),
+    "read_file":  lambda a: (
+        _read_file(a.get("file_path",""), a.get("offset",1), a.get("limit"))
+        if _CODING_TOOLS_AVAILABLE else "read_file not available"),
+    "write_file": lambda a: (
+        _write_file(a.get("file_path",""), a.get("content",""))
+        if _CODING_TOOLS_AVAILABLE else "write_file not available"),
+    "edit_file":  lambda a: (
+        _edit_file(a.get("file_path",""), a.get("old_string",""),
+                   a.get("new_string",""), a.get("replace_all", False))
+        if _CODING_TOOLS_AVAILABLE else "edit_file not available"),
+    "glob_files": lambda a: (
+        _glob_files(a.get("pattern",""), a.get("path"))
+        if _CODING_TOOLS_AVAILABLE else "glob_files not available"),
+    "grep_files": lambda a: (
+        _grep_files(a.get("pattern",""), a.get("path"), a.get("file_glob"),
+                    a.get("case_insensitive", False), a.get("context_lines", 0))
+        if _CODING_TOOLS_AVAILABLE else "grep_files not available"),
 }
 
 

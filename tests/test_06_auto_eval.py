@@ -30,7 +30,7 @@ from collections import defaultdict
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "serve"))
 
-_WS       = pathlib.Path(os.environ.get("WORKSPACE_DIR", "/home/beast/projects/workspaces/juspay"))
+_WS       = pathlib.Path(os.environ.get("WORKSPACE_DIR", "."))
 ALL_REPOS = pathlib.Path(os.environ.get("SOURCE_DIR",   str(_WS / "source")))
 GENERATED = pathlib.Path(__file__).parent / "generated"
 CASES_FILE = GENERATED / "eval_cases.json"
@@ -73,7 +73,7 @@ def _make_llm_client():
 
     api_key  = os.environ.get("LLM_API_KEY",  "")
     base_url = os.environ.get("LLM_BASE_URL", "")
-    model    = os.environ.get("LLM_MODEL",    "reasoning-large-model")
+    model    = os.environ.get("LLM_MODEL",    "kimi-latest")
     return OpenAI(api_key=api_key, base_url=base_url), model
 
 
