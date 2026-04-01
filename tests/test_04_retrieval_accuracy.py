@@ -441,10 +441,51 @@ else:
     fail(f"YAML roundtrip broken: {loaded}")
 
 
+# 11. Suggested Reviewers — module ownership + blast radius integration
+# ══════════════════════════════════════════════════════════════════════════════
+print("\n=== 11. Suggested Reviewers (ownership_index + suggest_reviewers) ===")
+
+# Test 1: suggest_reviewers returns results for a known module
+reviewers = RE.suggest_reviewers(["PaymentFlows"])
+if reviewers["source"] == "ownership_index":
+    ok("suggest_reviewers source: ownership_index loaded")
+else:
+    fail(f"suggest_reviewers source wrong: {reviewers['source']}")
+
+# Test 2: reviewers list is non-empty for a well-connected module
+if len(reviewers["reviewers"]) > 0:
+    top = reviewers["reviewers"][0]
+    ok(f"suggest_reviewers returns reviewers: top={top['name']} ({top['commits']} commits)")
+else:
+    fail("suggest_reviewers returned no reviewers for PaymentFlows")
+
+# Test 3: each reviewer has required fields
+if reviewers["reviewers"]:
+    r = reviewers["reviewers"][0]
+    required = {"email", "name", "score", "commits", "modules"}
+    if required.issubset(r.keys()):
+        ok("reviewer has all required fields (email, name, score, commits, modules)")
+    else:
+        fail(f"reviewer missing fields: {required - set(r.keys())}")
+
+# Test 4: coverage dict contains the queried module
+if "PaymentFlows" in reviewers.get("coverage", {}):
+    ok("coverage includes queried module 'PaymentFlows'")
+else:
+    fail(f"coverage missing PaymentFlows: {list(reviewers.get('coverage', {}).keys())[:5]}")
+
+# Test 5: suggest_reviewers with empty/unknown module returns gracefully
+empty_result = RE.suggest_reviewers(["NonExistentModule12345"])
+if empty_result["source"] == "ownership_index" and isinstance(empty_result["reviewers"], list):
+    ok("suggest_reviewers handles unknown modules gracefully")
+else:
+    fail(f"suggest_reviewers broke on unknown module: {empty_result}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SUMMARY
 # ══════════════════════════════════════════════════════════════════════════════
-n_sections = 10
+n_sections = 11
 print()
 if errors:
     print(f"\033[91m{len(errors)} FAILED: {errors}\033[0m")
