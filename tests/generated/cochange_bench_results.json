@@ -1,0 +1,227 @@
+{
+  "timestamp": "2026-04-01 20:30:11",
+  "total_queries": 10,
+  "total_new_modules": 245,
+  "avg_new_modules_per_query": 24.5,
+  "queries_helped": 10,
+  "avg_latency_with_ms": 52.8916597366333,
+  "avg_latency_without_ms": 45.102763175964355,
+  "overhead_ms": 7.788896560668945,
+  "details": [
+    {
+      "query": "payment flow mapper",
+      "modules_with": 19,
+      "modules_without": 11,
+      "new_modules": 8,
+      "new_module_names": [
+        "Euler.API.Gateway.Gateway.XENDIT.Transforms",
+        "Euler.API.Gateway.Gateway.XENDIT.Types",
+        "Euler.Common.Utils",
+        "Euler.API.PreTxn.EmiPlans.Types",
+        "Euler.Wai"
+      ],
+      "nodes_with": 501,
+      "nodes_without": 58,
+      "services_with": 4,
+      "services_without": 4,
+      "new_services": [],
+      "time_with": 0.05820751190185547,
+      "time_without": 0.056653738021850586
+    },
+    {
+      "query": "gateway routes",
+      "modules_with": 40,
+      "modules_without": 12,
+      "new_modules": 28,
+      "new_module_names": [
+        "Euler.API.Gateway.Gateway.OpenFinanceBR.Flows.Mandate",
+        "Euler.API.Gateway.Gateway.OpenFinanceBR.Flows.Sync",
+        "Euler.API.Gateway.Gateway.OpenFinanceBR.Transforms.PCM",
+        "Euler.API.Gateway.Gateway.OpenFinanceBR.Instances",
+        "Euler.API.Gateway.Gateway.OpenFinanceBR.Types.Mandate"
+      ],
+      "nodes_with": 1256,
+      "nodes_without": 60,
+      "services_with": 3,
+      "services_without": 2,
+      "new_services": [
+        "euler-api-pre-txn"
+      ],
+      "time_with": 0.05262470245361328,
+      "time_without": 0.04947519302368164
+    },
+    {
+      "query": "transaction sync",
+      "modules_with": 31,
+      "modules_without": 9,
+      "new_modules": 22,
+      "new_module_names": [
+        "Euler.API.Gateway.Gateway.PineLabsOnline.Transforms.Transaction",
+        "Euler.API.Gateway.Gateway.PineLabsOnline.Instances",
+        "Euler.API.Gateway.Gateway.PineLabsOnline.Flows.Refund",
+        "Euler.API.Gateway.Gateway.Common",
+        "Euler.API.Gateway.Gateway.PineLabsOnline.Types.RefundTypes"
+      ],
+      "nodes_with": 4500,
+      "nodes_without": 60,
+      "services_with": 3,
+      "services_without": 2,
+      "new_services": [
+        "euler-api-pre-txn"
+      ],
+      "time_with": 0.05463528633117676,
+      "time_without": 0.04484820365905762
+    },
+    {
+      "query": "refund processing",
+      "modules_with": 56,
+      "modules_without": 30,
+      "new_modules": 26,
+      "new_module_names": [
+        "Euler.API.Order",
+        "Euler.Product.OLTP.Order.OrderStatus",
+        "Gateway.PayTMv2.Flow",
+        "Gateway.Billdesk.Flow",
+        "Gateway.Paytm.Transforms"
+      ],
+      "nodes_with": 9914,
+      "nodes_without": 60,
+      "services_with": 3,
+      "services_without": 3,
+      "new_services": [],
+      "time_with": 0.06171679496765137,
+      "time_without": 0.04760861396789551
+    },
+    {
+      "query": "mandate creation",
+      "modules_with": 51,
+      "modules_without": 29,
+      "new_modules": 22,
+      "new_module_names": [
+        "Euler.API.Gateway.Gateway.NDPS.Flows.TransactionSync",
+        "Euler.API.Gateway.Gateway.NDPS.Flows.SendCollect",
+        "Euler.API.Gateway.Gateway.NDPS.Types.Mandate",
+        "Euler.API.Gateway.Gateway.NDPS.Flows.Transaction",
+        "Euler.API.Gateway.Gateway.NDPS.Types.SendCollect"
+      ],
+      "nodes_with": 3429,
+      "nodes_without": 58,
+      "services_with": 7,
+      "services_without": 7,
+      "new_services": [],
+      "time_with": 0.046906232833862305,
+      "time_without": 0.03846454620361328
+    },
+    {
+      "query": "order status update",
+      "modules_with": 49,
+      "modules_without": 19,
+      "new_modules": 30,
+      "new_module_names": [
+        "Euler.Server",
+        "Euler.Product.OLTP.Order.OrderStatus",
+        "Euler.API.Order",
+        "Euler.Product.OLTP.Order.OrderPaymentPageImpl",
+        "Euler.Product.OLTP.Order.CreateUpdateImpl"
+      ],
+      "nodes_with": 5205,
+      "nodes_without": 58,
+      "services_with": 5,
+      "services_without": 5,
+      "new_services": [],
+      "time_with": 0.05785226821899414,
+      "time_without": 0.05360221862792969
+    },
+    {
+      "query": "customer authentication",
+      "modules_with": 50,
+      "modules_without": 26,
+      "new_modules": 24,
+      "new_module_names": [
+        "Euler.Common.Errors.PredefinedErrors",
+        "Euler.Server",
+        "Euler.Product.OLTP.Order.CreateUpdateImpl",
+        "Euler.Product.OLTP.Order.OrderStatus",
+        "Euler.Product.OLTP.Order.PaymentStatusImpl"
+      ],
+      "nodes_with": 6253,
+      "nodes_without": 56,
+      "services_with": 8,
+      "services_without": 6,
+      "new_services": [
+        "euler-api-pre-txn",
+        "basilisk-v3"
+      ],
+      "time_with": 0.049981117248535156,
+      "time_without": 0.04003596305847168
+    },
+    {
+      "query": "settlement flow",
+      "modules_with": 60,
+      "modules_without": 32,
+      "new_modules": 28,
+      "new_module_names": [
+        "Euler.Config.EnvVars",
+        "Main",
+        "Euler.API.PreTxn.ListOffers.Flow",
+        "Euler.Services.CardInfoService",
+        "Euler.External.EC.Flow"
+      ],
+      "nodes_with": 5552,
+      "nodes_without": 57,
+      "services_with": 10,
+      "services_without": 5,
+      "new_services": [
+        "basilisk-v3",
+        "euler-api-customer",
+        "euler-db",
+        "euler-api-order",
+        "haskell-sequelize"
+      ],
+      "time_with": 0.0536801815032959,
+      "time_without": 0.04322099685668945
+    },
+    {
+      "query": "UPI collect",
+      "modules_with": 51,
+      "modules_without": 24,
+      "new_modules": 27,
+      "new_module_names": [
+        "Euler.App.Routes",
+        "Euler.Customer.Product.OLTP.Wallet.WalletImpl",
+        "Euler.Customer.Product.OLTP.VirtualAccount.VirtualAccountImpl",
+        "Euler.Customer.Product.OLTP.BankAccount.BankAccountImpl",
+        "Euler.Customer.Product.OLTP.Customer.CustomerImpl"
+      ],
+      "nodes_with": 5729,
+      "nodes_without": 58,
+      "services_with": 7,
+      "services_without": 6,
+      "new_services": [
+        "basilisk-v3"
+      ],
+      "time_with": 0.047373056411743164,
+      "time_without": 0.038175106048583984
+    },
+    {
+      "query": "card tokenization",
+      "modules_with": 44,
+      "modules_without": 14,
+      "new_modules": 30,
+      "new_module_names": [
+        "Euler.Server",
+        "Euler.Product.OLTP.Order.OrderStatus",
+        "Euler.API.Order",
+        "Euler.Product.OLTP.Order.PaymentStatusImpl",
+        "Euler.Storage.Repository.TxnCardInfo"
+      ],
+      "nodes_with": 5941,
+      "nodes_without": 59,
+      "services_with": 7,
+      "services_without": 7,
+      "new_services": [],
+      "time_with": 0.04593944549560547,
+      "time_without": 0.03894305229187012
+    }
+  ]
+}
