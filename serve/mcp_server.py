@@ -455,6 +455,19 @@ def check_my_changes(changed_files: list[str]) -> str:
             mods = ", ".join(r["modules"][:3])
             lines.append(f"  - **{r['name']}** ({r['commits']} commits) -- {mods}")
 
+    # Risk score (computed from already-fetched data to avoid redundant calls)
+    risk = RE.score_change_risk(changed_mods)
+    rs = risk["risk_score"]
+    rl = risk["risk_level"]
+    lines.insert(1, f"\n**Risk Score: {rs}/100 ({rl})**")
+    comps = risk.get("components", {})
+    comp_parts = []
+    for name, c in comps.items():
+        label = name.replace("_", " ").title()
+        comp_parts.append(f"{label}: {c['score']}")
+    if comp_parts:
+        lines.insert(2, f"Components: {' | '.join(comp_parts)}")
+
     if status == "PASS":
         lines.append("\n*Your changes look complete. Safe to commit.*")
     elif status == "WARN":
