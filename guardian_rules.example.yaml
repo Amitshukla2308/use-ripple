@@ -44,6 +44,15 @@ rules:
   #   verdict: WARN
   #   message: "Database schema change — review migration plan"
 
+# Risk scoring weights (used by score_change_risk)
+# Each weight controls how much a component contributes to the composite score.
+# Values are normalized to sum to 1.0 at runtime.
+risk_weights:
+  blast_radius: 0.35      # How many services are affected
+  coverage_gap: 0.30      # How many co-changes are missing from the changeset
+  reviewer_risk: 0.20     # Ownership concentration / bus factor
+  service_spread: 0.15    # How many services the changed files span
+
   # Example: Warn when blast radius crosses service boundaries
   # - name: "Cross-service impact"
   #   match:

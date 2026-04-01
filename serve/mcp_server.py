@@ -516,6 +516,59 @@ def suggest_reviewers(changed_files: list[str], top_k: int = 5) -> str:
 
 
 @mcp.tool()
+def score_change_risk(changed_files: list[str], weights: dict | None = None) -> str:
+    """
+    Compute a composite risk score (0-100) for a set of changed files/modules.
+
+    Combines four signals into one actionable number:
+    - Blast radius (how many services affected)
+    - Coverage gap (how many co-changes are missing)
+    - Reviewer risk (bus factor / ownership concentration)
+    - Service spread (how many services the changes span)
+
+    Use this to gate PRs in CI/CD or prioritize review effort.
+
+    Returns: risk score, risk level (LOW/MEDIUM/HIGH/CRITICAL),
+    per-component breakdown, and recommendation.
+
+    Examples:
+      score_change_risk(["PaymentFlows", "TransactionHelper"])
+      score_change_risk(["euler-api-gateway/src/Routes.hs"])
+    """
+    # Resolve files to modules
+    resolved = RE.resolve_files_to_modules(changed_files)
+    changed_mods = []
+    for f, mods in resolved.items():
+        if mods:
+            changed_mods.extend(mods)
+        elif "." in f or "::" in f:
+            changed_mods.append(f)
+
+    if not changed_mods:
+        return ("Could not resolve any inputs to known modules.\n"
+                "Try passing module names directly (e.g. 'PaymentFlows').")
+
+    rules = None
+    if weights:
+        rules = {"risk_weights": weights}
+
+    result = RE.score_change_risk(changed_mods, rules=rules)
+
+    lines = [f"## Change Risk Score: {result['risk_score']}/100 — {result['risk_level']}\n"]
+
+    # Component breakdown
+    lines.append("| Component | Score | Detail |")
+    lines.append("|-----------|-------|--------|")
+    for name, comp in result.get("components", {}).items():
+        label = name.replace("_", " ").title()
+        lines.append(f"| {label} | {comp['score']}/100 | {comp['detail']} |")
+
+    lines.append(f"\n**Recommendation:** {result['recommendation']}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def get_context(
     query: str,
     persona: str = "default",

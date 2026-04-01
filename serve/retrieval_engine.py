@@ -972,6 +972,194 @@ def suggest_reviewers(changed_modules: list, top_k: int = 5) -> dict:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# Change Risk Scoring  (composite risk score from all signals)
+# ════════════════════════════════════════════════════════════════════════════
+
+def score_change_risk(modules: list, rules: dict | None = None) -> dict:
+    """Compute a composite risk score (0-100) for a set of changed modules.
+
+    Combines blast radius, coverage gap, reviewer concentration, and service
+    spread into a single actionable number with per-component breakdown.
+
+    Args:
+        modules: list of changed module names (any format accepted)
+        rules:   optional dict with 'risk_weights' key to override defaults
+
+    Returns:
+        dict with risk_score (0-100), risk_level, components, recommendation
+    """
+    changed = [m for m in modules if m]
+    if not changed:
+        return {
+            "risk_score": 0, "risk_level": "LOW",
+            "components": {}, "recommendation": "No modules provided.",
+        }
+
+    # ── Configurable weights ──
+    defaults = {"blast_radius": 0.35, "coverage_gap": 0.30,
+                "reviewer_risk": 0.20, "service_spread": 0.15}
+    weights = defaults.copy()
+    if rules and "risk_weights" in rules:
+        for k, v in rules["risk_weights"].items():
+            if k in weights:
+                weights[k] = float(v)
+        # Re-normalize so weights sum to 1.0
+        total = sum(weights.values())
+        if total > 0:
+            weights = {k: v / total for k, v in weights.items()}
+
+    # ── 1. Blast Radius Score ──
+    blast = get_blast_radius(changed, max_hops=2)
+    n_services = len(blast.get("affected_services", []))
+    n_cochange = len(blast.get("cochange_neighbors", []))
+    n_import   = len(blast.get("import_neighbors", []))
+
+    if n_services == 0:
+        blast_score = 0
+    elif n_services <= 2:
+        blast_score = 20
+    elif n_services <= 5:
+        blast_score = 50
+    elif n_services <= 10:
+        blast_score = 75
+    else:
+        blast_score = 100
+
+    blast_component = {
+        "score": blast_score,
+        "services_affected": n_services,
+        "import_neighbors": n_import,
+        "cochange_neighbors": n_cochange,
+        "detail": f"{n_services} services in blast radius",
+    }
+
+    # ── 2. Coverage Gap Score ──
+    pmc = predict_missing_changes(changed)
+    coverage_score = pmc.get("coverage_score", 1.0)
+    n_missing = len(pmc.get("predictions", []))
+    gap_score = round((1.0 - coverage_score) * 100)
+
+    coverage_component = {
+        "score": gap_score,
+        "missing_changes": n_missing,
+        "coverage_score": coverage_score,
+        "detail": f"{round((1 - coverage_score) * 100)}% of typical co-changes not included",
+    }
+
+    # ── 3. Reviewer Risk Score ──
+    rev = suggest_reviewers(changed, top_k=5)
+    reviewers_list = rev.get("reviewers", [])
+
+    if rev.get("source") == "unavailable" or not reviewers_list:
+        reviewer_score = 50  # unknown = moderate risk
+        reviewer_detail = "No ownership data available"
+        top_dominance = None
+    else:
+        total_score = sum(r["score"] for r in reviewers_list)
+        top_dominance = reviewers_list[0]["score"] / total_score if total_score > 0 else 0
+        if top_dominance > 0.8:
+            reviewer_score = 100  # bus factor = 1
+        elif top_dominance > 0.6:
+            reviewer_score = 70
+        elif top_dominance > 0.4:
+            reviewer_score = 40
+        elif len(reviewers_list) >= 3:
+            reviewer_score = 20
+        else:
+            reviewer_score = 35
+        reviewer_detail = (f"Top reviewer has {round(top_dominance * 100)}% of expertise"
+                          if top_dominance else "Distributed ownership")
+
+    reviewer_component = {
+        "score": reviewer_score,
+        "top_reviewer_dominance": round(top_dominance, 2) if top_dominance is not None else None,
+        "available_reviewers": len(reviewers_list),
+        "detail": reviewer_detail,
+    }
+
+    # ── 4. Service Spread Score ──
+    unique_services = set()
+    for mod in changed:
+        # Extract service from module path if possible
+        cc = _resolve_cc(mod)
+        if cc and "::" in cc:
+            unique_services.add(cc.split("::")[0])
+    # Also count from blast radius
+    for svc in blast.get("affected_services", []):
+        unique_services.add(svc)
+
+    n_unique = len(unique_services)
+    if n_unique <= 1:
+        spread_score = 0
+    elif n_unique == 2:
+        spread_score = 30
+    elif n_unique == 3:
+        spread_score = 50
+    elif n_unique <= 5:
+        spread_score = 80
+    else:
+        spread_score = 100
+
+    spread_component = {
+        "score": spread_score,
+        "unique_services": n_unique,
+        "services": sorted(unique_services),
+        "detail": f"Changes span {n_unique} service{'s' if n_unique != 1 else ''}",
+    }
+
+    # ── Composite Score ──
+    composite = round(
+        blast_score * weights["blast_radius"]
+        + gap_score * weights["coverage_gap"]
+        + reviewer_score * weights["reviewer_risk"]
+        + spread_score * weights["service_spread"]
+    )
+
+    if composite <= 30:
+        level = "LOW"
+    elif composite <= 60:
+        level = "MEDIUM"
+    elif composite <= 80:
+        level = "HIGH"
+    else:
+        level = "CRITICAL"
+
+    # ── Recommendation ──
+    parts = []
+    if n_services > 3:
+        parts.append(f"{n_services} services affected")
+    if n_missing > 5:
+        parts.append(f"{n_missing} predicted co-changes missing")
+    if reviewer_score >= 70 and reviewers_list:
+        parts.append(f"high reviewer concentration on {reviewers_list[0]['name']}")
+    if n_unique > 3:
+        parts.append(f"spans {n_unique} services")
+
+    if not parts:
+        if level == "LOW":
+            recommendation = "Low risk change. Proceed normally."
+        else:
+            recommendation = f"{level} risk. Review component scores for details."
+    else:
+        recommendation = f"{level} risk. {'; '.join(parts)}."
+        if level in ("HIGH", "CRITICAL") and reviewers_list:
+            top_names = [r["name"] for r in reviewers_list[:3]]
+            recommendation += f" Suggested reviewers: {', '.join(top_names)}."
+
+    return {
+        "risk_score": composite,
+        "risk_level": level,
+        "components": {
+            "blast_radius": blast_component,
+            "coverage_gap": coverage_component,
+            "reviewer_risk": reviewer_component,
+            "service_spread": spread_component,
+        },
+        "recommendation": recommendation,
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # BM25  (exact-match complement to dense vector search)
 # ════════════════════════════════════════════════════════════════════════════
 

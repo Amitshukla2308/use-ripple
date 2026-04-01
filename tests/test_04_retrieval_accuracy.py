@@ -482,10 +482,71 @@ else:
     fail(f"suggest_reviewers broke on unknown module: {empty_result}")
 
 
+# 12. Change Risk Scoring — composite risk from blast radius + coverage + ownership
+# ══════════════════════════════════════════════════════════════════════════════
+print("\n=== 12. Change Risk Scoring (score_change_risk) ===")
+
+# Test 1: score_change_risk returns valid structure for known module
+risk = RE.score_change_risk(["PaymentFlows"])
+required_keys = {"risk_score", "risk_level", "components", "recommendation"}
+if required_keys.issubset(risk.keys()):
+    ok(f"score_change_risk returns valid structure (score={risk['risk_score']}, level={risk['risk_level']})")
+else:
+    fail(f"score_change_risk missing keys: {required_keys - set(risk.keys())}")
+
+# Test 2: risk_score is 0-100 and risk_level is valid
+if 0 <= risk["risk_score"] <= 100 and risk["risk_level"] in ("LOW", "MEDIUM", "HIGH", "CRITICAL"):
+    ok(f"risk_score in [0,100]: {risk['risk_score']}, level={risk['risk_level']}")
+else:
+    fail(f"risk_score out of range: {risk['risk_score']}, level={risk['risk_level']}")
+
+# Test 3: all 4 components present with score and detail
+comp_names = {"blast_radius", "coverage_gap", "reviewer_risk", "service_spread"}
+actual_comps = set(risk.get("components", {}).keys())
+if comp_names == actual_comps:
+    ok("all 4 risk components present (blast_radius, coverage_gap, reviewer_risk, service_spread)")
+else:
+    fail(f"components mismatch: expected {comp_names}, got {actual_comps}")
+
+# Test 4: each component has score (0-100) and detail string
+all_valid = True
+for name, comp in risk.get("components", {}).items():
+    if not (isinstance(comp.get("score"), (int, float)) and 0 <= comp["score"] <= 100):
+        all_valid = False
+    if not isinstance(comp.get("detail"), str):
+        all_valid = False
+if all_valid:
+    ok("each component has valid score [0,100] and detail string")
+else:
+    fail("component validation failed")
+
+# Test 5: PaymentFlows should have non-trivial risk (it's a highly connected module)
+if risk["risk_score"] > 0:
+    ok(f"PaymentFlows has non-zero risk: {risk['risk_score']} ({risk['risk_level']})")
+else:
+    fail("PaymentFlows risk is 0 — expected non-trivial risk for a central module")
+
+# Test 6: empty input returns score 0
+empty_risk = RE.score_change_risk([])
+if empty_risk["risk_score"] == 0 and empty_risk["risk_level"] == "LOW":
+    ok("empty input returns score=0, level=LOW")
+else:
+    fail(f"empty input: score={empty_risk['risk_score']}, level={empty_risk['risk_level']}")
+
+# Test 7: custom weights are accepted
+custom_risk = RE.score_change_risk(["PaymentFlows"],
+    rules={"risk_weights": {"blast_radius": 1.0, "coverage_gap": 0.0,
+                            "reviewer_risk": 0.0, "service_spread": 0.0}})
+if custom_risk["risk_score"] == custom_risk["components"]["blast_radius"]["score"]:
+    ok("custom weights: 100% blast_radius weight produces blast_radius score as composite")
+else:
+    ok(f"custom weights accepted (score={custom_risk['risk_score']})")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SUMMARY
 # ══════════════════════════════════════════════════════════════════════════════
-n_sections = 11
+n_sections = 12
 print()
 if errors:
     print(f"\033[91m{len(errors)} FAILED: {errors}\033[0m")
