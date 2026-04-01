@@ -53,9 +53,18 @@ jobs:
         id: guardian
         continue-on-error: true
         run: |
+          # Auto-detect rules file (repo root or artifact dir)
+          RULES_ARG=""
+          if [ -f "guardian_rules.yaml" ]; then
+            RULES_ARG="--rules guardian_rules.yaml"
+          elif [ -f "${{ env.ARTIFACT_DIR }}/guardian_rules.yaml" ]; then
+            RULES_ARG="--rules ${{ env.ARTIFACT_DIR }}/guardian_rules.yaml"
+          fi
+
           REPORT=$(python3 .hyperretrieval/apps/cli/pr_analyzer.py \
             --mode guardian \
             --artifact-dir "${{ env.ARTIFACT_DIR }}" \
+            $RULES_ARG \
             --files ${{ steps.changed.outputs.files }} \
             2>/dev/null)
 

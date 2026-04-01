@@ -1,0 +1,52 @@
+# Guardian Rules Configuration
+# Copy to guardian_rules.yaml and customize for your team.
+# Place in repo root or artifact directory — Guardian auto-detects both.
+#
+# Usage:
+#   git diff main...HEAD --name-only | python3 pr_analyzer.py --mode guardian --rules guardian_rules.yaml
+
+version: 1
+
+# Override default verdict thresholds
+thresholds:
+  coverage_fail: 0.5          # PR completeness below this = FAIL (default: 0.5)
+  coverage_warn: 0.8          # PR completeness below this = WARN (default: 0.8)
+  min_predictions_for_fail: 3  # Need this many missing-file predictions to trigger FAIL (default: 3)
+  max_services_warn: 3        # Blast radius spanning more services than this = WARN (default: 3)
+
+# Security-sensitive module detection
+# Default keywords: auth, token, credential, webhook, verify, pan, cvv, encrypt,
+#   integrity, secret, password, hmac, signature, session, oauth, jwt, cert, key
+security:
+  mode: extend      # extend = add to defaults | replace = use only these keywords
+  keywords:
+    - payment
+    - pci
+    - compliance
+    - billing
+
+# Custom policy rules — evaluated in order
+# Each rule has: name, match (when to trigger), optional require (conditions), verdict, message
+rules:
+  # Example: Block auth changes that don't include test files
+  # - name: "Auth changes require tests"
+  #   match:
+  #     modules: ["**/Auth*", "**/Session*", "**/OAuth*"]
+  #   require:
+  #     files_present: ["**/test*", "**/spec*", "**/*Test*"]
+  #   verdict: FAIL
+  #   message: "Auth module changes must include test coverage"
+
+  # Example: Warn on database migration files
+  # - name: "Database migration review"
+  #   match:
+  #     modules: ["**/Migration*", "**/Schema*"]
+  #   verdict: WARN
+  #   message: "Database schema change — review migration plan"
+
+  # Example: Warn when blast radius crosses service boundaries
+  # - name: "Cross-service impact"
+  #   match:
+  #     min_services: 2
+  #   verdict: WARN
+  #   message: "Changes affect multiple services — coordinate deployment"

@@ -18,7 +18,12 @@ Usage:
   # Security gate (exits non-zero if security-sensitive modules touched)
   git diff main...HEAD --name-only | python3 pr_analyzer.py --check security
 """
-import argparse, json, os, pathlib, sys
+import argparse, fnmatch, json, os, pathlib, sys
+
+try:
+    import yaml as _yaml
+except ImportError:
+    _yaml = None
 
 _REPO = pathlib.Path(__file__).parent.parent.parent   # apps/cli → apps → repo root
 sys.path.insert(0, str(_REPO / "serve"))              # for retrieval_engine.py
@@ -123,16 +128,32 @@ def _print_summary(files, seed_modules, unresolved, blast, fmt):
     return sec_flagged
 
 
-def _guardian_report(files, seed_mods, unresolved, blast, missing, fmt):
+def _guardian_report(files, seed_mods, unresolved, blast, missing, fmt, rules=None):
     """Generate a Guardian Mode report: blast radius + missing changes + verdict."""
+    if rules is None:
+        rules = _DEFAULT_RULES
     coverage = missing.get("coverage_score", 1.0)
     predictions = missing.get("predictions", [])
-    sec_flagged = _flag_security(
-        seed_mods + [n["module"] for n in blast["import_neighbors"]]
-    )
+    sec_keywords = _resolve_security_keywords(rules)
+    sec_flagged = [m for m in seed_mods + [n["module"] for n in blast["import_neighbors"]]
+                   if any(kw in m.lower() for kw in sec_keywords)]
     n_services = len(blast["affected_services"])
     n_import = len(blast["import_neighbors"])
     n_cochange = len(blast["cochange_neighbors"])
+
+    # Evaluate custom rules
+    custom_triggered = _evaluate_custom_rules(rules, seed_mods, files, blast)
+
+    # Build base verdict from thresholds
+    verdict = _guardian_verdict(coverage, n_services, sec_flagged, predictions, rules)
+
+    # Custom rules can escalate verdict
+    for cr in custom_triggered:
+        cr_status = cr.get("verdict", "WARN")
+        if cr_status == "FAIL" and verdict["status"] != "FAIL":
+            verdict = {"status": "FAIL", "reason": cr.get("message", cr.get("name", "Custom rule failed"))}
+        elif cr_status == "WARN" and verdict["status"] == "PASS":
+            verdict = {"status": "WARN", "reason": cr.get("message", cr.get("name", "Custom rule warning"))}
 
     if fmt == "json":
         return json.dumps({
@@ -149,7 +170,9 @@ def _guardian_report(files, seed_mods, unresolved, blast, missing, fmt):
                 "predictions": predictions,
             },
             "security_flagged": sec_flagged,
-            "verdict": _guardian_verdict(coverage, n_services, sec_flagged, predictions),
+            "custom_rules_triggered": [{"name": r.get("name",""), "verdict": r.get("verdict","WARN"),
+                                         "message": r.get("message","")} for r in custom_triggered],
+            "verdict": verdict,
         }, indent=2)
 
     # Markdown report
@@ -157,7 +180,6 @@ def _guardian_report(files, seed_mods, unresolved, blast, missing, fmt):
     lines.append("## Guardian Report\n")
 
     # Verdict banner
-    verdict = _guardian_verdict(coverage, n_services, sec_flagged, predictions)
     icon = {"PASS": "OK", "WARN": "WARNING", "FAIL": "BLOCKED"}[verdict["status"]]
     lines.append(f"**{icon}:** {verdict['reason']}\n")
 
@@ -171,6 +193,15 @@ def _guardian_report(files, seed_mods, unresolved, blast, missing, fmt):
     lines.append(f"| Co-change neighbors | {n_cochange} |")
     lines.append(f"| PR completeness | {coverage*100:.0f}% |")
     lines.append("")
+
+    # Custom rules triggered
+    if custom_triggered:
+        lines.append("### Policy Rules Triggered\n")
+        lines.append("| Rule | Verdict | Message |")
+        lines.append("|------|---------|---------|")
+        for cr in custom_triggered:
+            lines.append(f"| {cr.get('name','')} | {cr.get('verdict','WARN')} | {cr.get('message','')} |")
+        lines.append("")
 
     # Missing changes
     if predictions:
@@ -202,18 +233,139 @@ def _guardian_report(files, seed_mods, unresolved, blast, missing, fmt):
     return "\n".join(lines)
 
 
-def _guardian_verdict(coverage, n_services, sec_flagged, predictions):
-    """Determine pass/warn/fail based on analysis."""
-    if coverage < 0.5 and len(predictions) >= 3:
+# ── Guardian Rules Engine ─────────────────────────────────────────────────────
+
+_DEFAULT_RULES = {
+    "version": 1,
+    "thresholds": {
+        "coverage_fail": 0.5,
+        "coverage_warn": 0.8,
+        "min_predictions_for_fail": 3,
+        "max_services_warn": 3,
+    },
+    "security": {
+        "mode": "extend",
+        "keywords": [],
+    },
+    "rules": [],
+}
+
+
+def _load_guardian_rules(rules_path=None):
+    """Load guardian rules from YAML. Returns merged config with defaults."""
+    if rules_path is None or _yaml is None:
+        return _DEFAULT_RULES.copy()
+
+    path = pathlib.Path(rules_path)
+    if not path.exists():
+        print(f"Guardian rules file not found: {path}", file=sys.stderr)
+        return _DEFAULT_RULES.copy()
+
+    with open(path) as f:
+        user_rules = _yaml.safe_load(f) or {}
+
+    # Merge with defaults
+    merged = _DEFAULT_RULES.copy()
+    if "thresholds" in user_rules:
+        merged["thresholds"] = {**merged["thresholds"], **user_rules["thresholds"]}
+    if "security" in user_rules:
+        merged["security"] = user_rules["security"]
+    if "rules" in user_rules:
+        merged["rules"] = user_rules["rules"]
+    return merged
+
+
+def _resolve_security_keywords(rules):
+    """Build final security keywords set from rules config."""
+    base = set(_SECURITY_KEYWORDS)
+    sec_cfg = rules.get("security", {})
+    extra = set(sec_cfg.get("keywords", []))
+    if sec_cfg.get("mode") == "replace":
+        return extra
+    return base | extra
+
+
+def _match_module_pattern(module, patterns):
+    """Check if a module matches any glob pattern.
+
+    Handles both file-path patterns (with /) and module patterns (with .).
+    '**/Auth*' matches both 'src/Auth/Login.hs' and 'Euler.Auth.Session'.
+    """
+    for pat in patterns:
+        # Direct match
+        if fnmatch.fnmatch(module, pat) or fnmatch.fnmatch(module.lower(), pat.lower()):
+            return True
+        # Convert path-style pattern to dot-style for module matching
+        dot_pat = pat.replace("/", ".").replace("**.", "*").replace("..", ".")
+        if fnmatch.fnmatch(module, dot_pat) or fnmatch.fnmatch(module.lower(), dot_pat.lower()):
+            return True
+    return False
+
+
+def _evaluate_custom_rules(rules, seed_modules, changed_files, blast):
+    """Evaluate custom rules from config. Returns list of triggered rules."""
+    triggered = []
+    for rule in rules.get("rules", []):
+        match_cfg = rule.get("match", {})
+        matched = False
+
+        # Match by module patterns
+        if "modules" in match_cfg:
+            patterns = match_cfg["modules"]
+            for mod in seed_modules:
+                if _match_module_pattern(mod, patterns):
+                    matched = True
+                    break
+
+        # Match by min_services
+        if "min_services" in match_cfg:
+            if len(blast.get("affected_services", [])) >= match_cfg["min_services"]:
+                matched = True
+
+        if not matched:
+            continue
+
+        # Check requirements (if any)
+        require = rule.get("require", {})
+        requirements_met = True
+        if "files_present" in require:
+            patterns = require["files_present"]
+            found = any(
+                _match_module_pattern(f, patterns) for f in changed_files
+            )
+            if not found:
+                requirements_met = False
+
+        if matched and not requirements_met:
+            triggered.append(rule)
+        elif matched and not require:
+            # Rule with no requirements triggers on match alone
+            triggered.append(rule)
+
+    return triggered
+
+
+def _guardian_verdict(coverage, n_services, sec_flagged, predictions, rules=None):
+    """Determine pass/warn/fail based on analysis and rules."""
+    if rules is None:
+        rules = _DEFAULT_RULES
+
+    t = rules.get("thresholds", _DEFAULT_RULES["thresholds"])
+    cov_fail = t.get("coverage_fail", 0.5)
+    cov_warn = t.get("coverage_warn", 0.8)
+    min_pred = t.get("min_predictions_for_fail", 3)
+    max_svc  = t.get("max_services_warn", 3)
+
+    if coverage < cov_fail and len(predictions) >= min_pred:
         return {"status": "FAIL",
                 "reason": f"PR completeness {coverage*100:.0f}% with {len(predictions)} likely-missing files"}
     if sec_flagged:
         return {"status": "WARN",
                 "reason": f"{len(sec_flagged)} security-sensitive module(s) touched"}
-    if coverage < 0.8:
+    if coverage < cov_warn:
         return {"status": "WARN",
                 "reason": f"PR completeness {coverage*100:.0f}% -- review suggested"}
-    if n_services > 3:
+    if n_services > max_svc:
         return {"status": "WARN",
                 "reason": f"Blast radius spans {n_services} services"}
     return {"status": "PASS",
@@ -240,6 +392,8 @@ def main():
     parser.add_argument("--artifact-dir", default=None, dest="artifact_dir",
                         help="Path to artifact dir (default: auto-detect)")
     parser.add_argument("--config",   default=None, help="Path to config.yaml")
+    parser.add_argument("--rules",    default=None,
+                        help="Path to guardian_rules.yaml (Guardian Mode only)")
     args = parser.parse_args()
 
     # Collect changed files
@@ -282,17 +436,40 @@ def main():
     blast      = RE.get_blast_radius(seed_mods, max_hops=args.max_hops)
 
     if args.mode == "guardian":
+        # Load guardian rules (auto-detect or explicit path)
+        rules_path = args.rules
+        if rules_path is None:
+            # Auto-detect: check artifact dir, then repo root
+            for candidate in [
+                artifact_dir / "guardian_rules.yaml" if artifact_dir else None,
+                _REPO / "guardian_rules.yaml",
+            ]:
+                if candidate and candidate.exists():
+                    rules_path = str(candidate)
+                    print(f"Using rules: {rules_path}", file=sys.stderr)
+                    break
+        rules = _load_guardian_rules(rules_path)
+
         missing = RE.predict_missing_changes(seed_mods)
-        report = _guardian_report(files, seed_mods, unresolved, blast, missing, args.format)
+        report = _guardian_report(files, seed_mods, unresolved, blast, missing, args.format, rules)
         print(report)
         # Exit non-zero on FAIL verdict
         if args.format != "json":
+            sec_keywords = _resolve_security_keywords(rules)
+            all_mods = seed_mods + [n["module"] for n in blast["import_neighbors"]]
+            sec_flagged = [m for m in all_mods if any(kw in m.lower() for kw in sec_keywords)]
             verdict = _guardian_verdict(
                 missing.get("coverage_score", 1.0),
                 len(blast["affected_services"]),
-                _flag_security(seed_mods + [n["module"] for n in blast["import_neighbors"]]),
+                sec_flagged,
                 missing.get("predictions", []),
+                rules,
             )
+            # Custom rules can escalate
+            for cr in _evaluate_custom_rules(rules, seed_mods, files, blast):
+                if cr.get("verdict") == "FAIL":
+                    verdict = {"status": "FAIL", "reason": cr.get("message", "Custom rule")}
+                    break
             if verdict["status"] == "FAIL":
                 sys.exit(1)
         sys.exit(0)

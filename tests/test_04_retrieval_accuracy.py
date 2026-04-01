@@ -285,10 +285,166 @@ else:
     fail("blast_radius should include co-change neighbors for PaymentFlows")
 
 
+# 10. Guardian Rules Engine — YAML config, custom thresholds, custom rules
+# ══════════════════════════════════════════════════════════════════════════════
+print("\n=== 10. Guardian Rules Engine (YAML config + custom rules) ===")
+
+# Import rules engine functions from pr_analyzer
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "apps" / "cli"))
+from pr_analyzer import (
+    _load_guardian_rules, _guardian_verdict, _resolve_security_keywords,
+    _evaluate_custom_rules, _match_module_pattern, _DEFAULT_RULES,
+)
+
+# Test 1: Default rules when no file exists
+default_rules = _load_guardian_rules(None)
+if default_rules["thresholds"]["coverage_fail"] == 0.5:
+    ok("default rules: coverage_fail=0.5")
+else:
+    fail(f"default rules wrong: {default_rules['thresholds']}")
+
+# Test 2: Custom thresholds override verdict
+strict_rules = {
+    "thresholds": {"coverage_fail": 0.7, "coverage_warn": 0.9,
+                   "min_predictions_for_fail": 2, "max_services_warn": 2},
+    "security": {"mode": "extend", "keywords": []},
+    "rules": [],
+}
+# With default thresholds, 60% coverage + 2 predictions = PASS
+v_default = _guardian_verdict(0.6, 1, [], [{"m": 1}, {"m": 2}], _DEFAULT_RULES)
+# With strict thresholds, same scenario = FAIL (0.6 < 0.7, 2 predictions >= 2)
+v_strict = _guardian_verdict(0.6, 1, [], [{"m": 1}, {"m": 2}], strict_rules)
+if v_default["status"] == "WARN" and v_strict["status"] == "FAIL":
+    ok("custom thresholds change verdict: WARN->FAIL with stricter config")
+else:
+    fail(f"threshold override broken: default={v_default['status']}, strict={v_strict['status']}")
+
+# Test 3: Security keyword extension
+rules_ext = {"security": {"mode": "extend", "keywords": ["payment", "billing"]}}
+kw = _resolve_security_keywords(rules_ext)
+if "payment" in kw and "auth" in kw:
+    ok("security extend: custom + default keywords present")
+else:
+    fail(f"security extend broken: {kw}")
+
+# Test 4: Security keyword replacement
+rules_repl = {"security": {"mode": "replace", "keywords": ["payment", "billing"]}}
+kw2 = _resolve_security_keywords(rules_repl)
+if "payment" in kw2 and "auth" not in kw2:
+    ok("security replace: only custom keywords, defaults removed")
+else:
+    fail(f"security replace broken: {kw2}")
+
+# Test 5: Module pattern matching
+if _match_module_pattern("Euler.Auth.Session", ["**/Auth*"]):
+    ok("module pattern: '**/Auth*' matches 'Euler.Auth.Session'")
+else:
+    fail("module pattern matching broken")
+
+# Test 6: Custom rule triggers on module match (no require)
+rules_custom = {
+    "thresholds": _DEFAULT_RULES["thresholds"],
+    "security": {"mode": "extend", "keywords": []},
+    "rules": [{
+        "name": "DB migration review",
+        "match": {"modules": ["*Migration*", "*Schema*"]},
+        "verdict": "WARN",
+        "message": "Database schema change detected",
+    }],
+}
+triggered = _evaluate_custom_rules(
+    rules_custom, ["Euler.DB.Migration.V42"], ["migration.hs"], {"affected_services": []}
+)
+if len(triggered) == 1 and triggered[0]["name"] == "DB migration review":
+    ok("custom rule triggers on module match")
+else:
+    fail(f"custom rule not triggered: {triggered}")
+
+# Test 7: Custom rule with unsatisfied requirement does trigger (missing files = violation)
+rules_require = {
+    "thresholds": _DEFAULT_RULES["thresholds"],
+    "security": {"mode": "extend", "keywords": []},
+    "rules": [{
+        "name": "Auth needs tests",
+        "match": {"modules": ["*Auth*"]},
+        "require": {"files_present": ["*test*", "*spec*"]},
+        "verdict": "FAIL",
+        "message": "Auth changes must include tests",
+    }],
+}
+# No test files in changed files → requirement not met → rule triggers
+triggered2 = _evaluate_custom_rules(
+    rules_require, ["Euler.Auth.Login"], ["src/Auth/Login.hs"], {"affected_services": []}
+)
+if len(triggered2) == 1:
+    ok("custom rule with unmet requirement triggers correctly")
+else:
+    fail(f"requirement-based rule broken: {triggered2}")
+
+# Test 8: Custom rule does NOT trigger when requirement IS met
+triggered3 = _evaluate_custom_rules(
+    rules_require, ["Euler.Auth.Login"],
+    ["src/Auth/Login.hs", "tests/Auth/LoginTest.hs"],
+    {"affected_services": []},
+)
+if len(triggered3) == 0:
+    ok("custom rule silent when requirement is met")
+else:
+    fail(f"rule triggered despite requirements met: {triggered3}")
+
+# Test 9: min_services match
+rules_svc = {
+    "thresholds": _DEFAULT_RULES["thresholds"],
+    "security": {"mode": "extend", "keywords": []},
+    "rules": [{
+        "name": "Cross-service warning",
+        "match": {"min_services": 2},
+        "verdict": "WARN",
+        "message": "Cross-service impact",
+    }],
+}
+triggered4 = _evaluate_custom_rules(
+    rules_svc, ["Mod"], ["f.hs"], {"affected_services": ["svc-a", "svc-b", "svc-c"]}
+)
+if len(triggered4) == 1:
+    ok("min_services rule triggers on 3 services (threshold=2)")
+else:
+    fail(f"min_services rule broken: {triggered4}")
+
+# Test 10: YAML loading from file (roundtrip)
+import tempfile
+test_yaml = """
+version: 1
+thresholds:
+  coverage_fail: 0.6
+  coverage_warn: 0.85
+security:
+  mode: replace
+  keywords: [pci, hipaa]
+rules:
+  - name: test rule
+    match:
+      modules: ["*Test*"]
+    verdict: WARN
+    message: test triggered
+"""
+with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tf:
+    tf.write(test_yaml)
+    tf.flush()
+    loaded = _load_guardian_rules(tf.name)
+os.unlink(tf.name)
+if (loaded["thresholds"]["coverage_fail"] == 0.6
+    and loaded["security"]["mode"] == "replace"
+    and len(loaded["rules"]) == 1):
+    ok("YAML roundtrip: load file, thresholds + security + rules parsed correctly")
+else:
+    fail(f"YAML roundtrip broken: {loaded}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SUMMARY
 # ══════════════════════════════════════════════════════════════════════════════
-n_sections = 9
+n_sections = 10
 print()
 if errors:
     print(f"\033[91m{len(errors)} FAILED: {errors}\033[0m")
