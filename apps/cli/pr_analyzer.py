@@ -129,7 +129,7 @@ def _print_summary(files, seed_modules, unresolved, blast, fmt):
 
 
 def _guardian_report(files, seed_mods, unresolved, blast, missing, fmt, rules=None,
-                     reviewers=None):
+                     reviewers=None, risk=None):
     """Generate a Guardian Mode report: blast radius + missing changes + verdict."""
     if rules is None:
         rules = _DEFAULT_RULES
@@ -176,6 +176,7 @@ def _guardian_report(files, seed_mods, unresolved, blast, missing, fmt, rules=No
             "custom_rules_triggered": [{"name": r.get("name",""), "verdict": r.get("verdict","WARN"),
                                          "message": r.get("message","")} for r in custom_triggered],
             "suggested_reviewers": reviewers.get("reviewers", []),
+            "risk": risk if risk else {},
             "verdict": verdict,
         }, indent=2)
 
@@ -186,6 +187,23 @@ def _guardian_report(files, seed_mods, unresolved, blast, missing, fmt, rules=No
     # Verdict banner
     icon = {"PASS": "OK", "WARN": "WARNING", "FAIL": "BLOCKED"}[verdict["status"]]
     lines.append(f"**{icon}:** {verdict['reason']}\n")
+
+    # Risk score
+    if risk:
+        rs = risk.get("risk_score", 0)
+        rl = risk.get("risk_level", "LOW")
+        lines.append(f"**Risk Score: {rs}/100 ({rl})**\n")
+        comps = risk.get("components", {})
+        if comps:
+            lines.append("| Component | Score |")
+            lines.append("|-----------|-------|")
+            for name, c in comps.items():
+                label = name.replace("_", " ").title()
+                lines.append(f"| {label} | {c['score']}/100 |")
+            lines.append("")
+        rec = risk.get("recommendation", "")
+        if rec:
+            lines.append(f"_{rec}_\n")
 
     # Stats
     lines.append(f"| Metric | Value |")
@@ -426,7 +444,8 @@ def main():
     print(f"Analyzing {len(files)} changed file(s)...", file=sys.stderr)
     _require_re("blast-radius analysis")
 
-    artifact_dir = pathlib.Path(args.artifact_dir) if args.artifact_dir else None
+    artifact_dir = pathlib.Path(args.artifact_dir) if args.artifact_dir else (
+        pathlib.Path(os.environ["ARTIFACT_DIR"]) if os.environ.get("ARTIFACT_DIR") else None)
     RE.initialize(
         artifact_dir=artifact_dir,
         load_embedder=False,   # keyword-only for CI speed (no GPU needed)
@@ -470,9 +489,38 @@ def main():
 
         missing = RE.predict_missing_changes(seed_mods)
         reviewers = RE.suggest_reviewers(seed_mods) if hasattr(RE, 'suggest_reviewers') else {}
+        risk = RE.score_change_risk(seed_mods, rules=rules) if hasattr(RE, 'score_change_risk') else None
         report = _guardian_report(files, seed_mods, unresolved, blast, missing, args.format, rules,
-                                  reviewers=reviewers)
+                                  reviewers=reviewers, risk=risk)
         print(report)
+
+        # Append to JSONL history for risk trending
+        if risk and artifact_dir:
+            import datetime
+            history_file = artifact_dir / "guardian_history.jsonl"
+            entry = {
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "modules": seed_mods,
+                "files": files,
+                "risk_score": risk.get("risk_score"),
+                "risk_level": risk.get("risk_level"),
+                "components": {k: v.get("score") for k, v in risk.get("components", {}).items()},
+                "coverage_score": missing.get("coverage_score"),
+                "services_affected": len(blast.get("affected_services", [])),
+                "verdict": _guardian_verdict(
+                    missing.get("coverage_score", 1.0),
+                    len(blast["affected_services"]),
+                    [],  # sec_flagged computed later
+                    missing.get("predictions", []),
+                    rules,
+                ).get("status", "UNKNOWN"),
+            }
+            try:
+                with open(history_file, "a") as hf:
+                    hf.write(json.dumps(entry) + "\n")
+                print(f"Risk history logged to {history_file}", file=sys.stderr)
+            except OSError:
+                pass  # Non-critical, don't fail the pipeline
         # Exit non-zero on FAIL verdict
         if args.format != "json":
             sec_keywords = _resolve_security_keywords(rules)
