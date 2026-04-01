@@ -123,6 +123,103 @@ def _print_summary(files, seed_modules, unresolved, blast, fmt):
     return sec_flagged
 
 
+def _guardian_report(files, seed_mods, unresolved, blast, missing, fmt):
+    """Generate a Guardian Mode report: blast radius + missing changes + verdict."""
+    coverage = missing.get("coverage_score", 1.0)
+    predictions = missing.get("predictions", [])
+    sec_flagged = _flag_security(
+        seed_mods + [n["module"] for n in blast["import_neighbors"]]
+    )
+    n_services = len(blast["affected_services"])
+    n_import = len(blast["import_neighbors"])
+    n_cochange = len(blast["cochange_neighbors"])
+
+    if fmt == "json":
+        return json.dumps({
+            "changed_files": files,
+            "seed_modules": seed_mods,
+            "unresolved_files": unresolved,
+            "blast_radius": {
+                "affected_services": blast["affected_services"],
+                "import_neighbors": n_import,
+                "cochange_neighbors": n_cochange,
+            },
+            "missing_changes": {
+                "coverage_score": coverage,
+                "predictions": predictions,
+            },
+            "security_flagged": sec_flagged,
+            "verdict": _guardian_verdict(coverage, n_services, sec_flagged, predictions),
+        }, indent=2)
+
+    # Markdown report
+    lines = []
+    lines.append("## Guardian Report\n")
+
+    # Verdict banner
+    verdict = _guardian_verdict(coverage, n_services, sec_flagged, predictions)
+    icon = {"PASS": "OK", "WARN": "WARNING", "FAIL": "BLOCKED"}[verdict["status"]]
+    lines.append(f"**{icon}:** {verdict['reason']}\n")
+
+    # Stats
+    lines.append(f"| Metric | Value |")
+    lines.append(f"|--------|-------|")
+    lines.append(f"| Changed files | {len(files)} |")
+    lines.append(f"| Resolved modules | {len(seed_mods)} |")
+    lines.append(f"| Affected services | {n_services} ({', '.join(blast['affected_services'])}) |")
+    lines.append(f"| Import neighbors | {n_import} |")
+    lines.append(f"| Co-change neighbors | {n_cochange} |")
+    lines.append(f"| PR completeness | {coverage*100:.0f}% |")
+    lines.append("")
+
+    # Missing changes
+    if predictions:
+        lines.append("### Likely Missing Files\n")
+        lines.append("| Module | Confidence | Weight | Reason |")
+        lines.append("|--------|------------|--------|--------|")
+        for p in predictions[:15]:
+            conf = f"{p['confidence']*100:.0f}%"
+            lines.append(f"| `{p['module']}` | {conf} | {p['weight']} | {p['reason']} |")
+        if len(predictions) > 15:
+            lines.append(f"\n_...and {len(predictions)-15} more predictions._")
+        lines.append("")
+
+    # Security flags
+    if sec_flagged:
+        lines.append("### Security-Sensitive Modules Touched\n")
+        for m in sec_flagged:
+            lines.append(f"- `{m}`")
+        lines.append("")
+
+    # Unresolved
+    if unresolved:
+        lines.append("### Unresolved Files\n")
+        lines.append("_These files could not be mapped to known modules:_")
+        for f in unresolved:
+            lines.append(f"- `{f}`")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _guardian_verdict(coverage, n_services, sec_flagged, predictions):
+    """Determine pass/warn/fail based on analysis."""
+    if coverage < 0.5 and len(predictions) >= 3:
+        return {"status": "FAIL",
+                "reason": f"PR completeness {coverage*100:.0f}% with {len(predictions)} likely-missing files"}
+    if sec_flagged:
+        return {"status": "WARN",
+                "reason": f"{len(sec_flagged)} security-sensitive module(s) touched"}
+    if coverage < 0.8:
+        return {"status": "WARN",
+                "reason": f"PR completeness {coverage*100:.0f}% -- review suggested"}
+    if n_services > 3:
+        return {"status": "WARN",
+                "reason": f"Blast radius spans {n_services} services"}
+    return {"status": "PASS",
+            "reason": f"PR completeness {coverage*100:.0f}%, blast radius contained"}
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="PR blast-radius analysis",
@@ -137,6 +234,8 @@ def main():
     parser.add_argument("--format",   choices=["text","json"], default="text")
     parser.add_argument("--check",    choices=["security"],
                         help="Exit non-zero when check fails")
+    parser.add_argument("--mode",     choices=["blast", "guardian"], default="blast",
+                        help="blast = blast radius only; guardian = full SDLC check")
     parser.add_argument("--max-hops", type=int, default=2, dest="max_hops")
     parser.add_argument("--artifact-dir", default=None, dest="artifact_dir",
                         help="Path to artifact dir (default: auto-detect)")
@@ -181,6 +280,23 @@ def main():
         sys.exit(0)
 
     blast      = RE.get_blast_radius(seed_mods, max_hops=args.max_hops)
+
+    if args.mode == "guardian":
+        missing = RE.predict_missing_changes(seed_mods)
+        report = _guardian_report(files, seed_mods, unresolved, blast, missing, args.format)
+        print(report)
+        # Exit non-zero on FAIL verdict
+        if args.format != "json":
+            verdict = _guardian_verdict(
+                missing.get("coverage_score", 1.0),
+                len(blast["affected_services"]),
+                _flag_security(seed_mods + [n["module"] for n in blast["import_neighbors"]]),
+                missing.get("predictions", []),
+            )
+            if verdict["status"] == "FAIL":
+                sys.exit(1)
+        sys.exit(0)
+
     sec_flagged = _print_summary(files, seed_mods, unresolved, blast, args.format)
 
     # Optional LLM explanation
