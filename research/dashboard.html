@@ -1,0 +1,1887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HyperRetrieval Research Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#080808;--surface:#0f0f0f;--surface2:#161616;--surface3:#1c1c1c;
+  --border:#222;--border2:#333;--text:#e0e0e0;--text2:#999;--text3:#666;
+  --cyan:#00D1FF;--cyan-dim:rgba(0,209,255,0.12);--cyan-glow:rgba(0,209,255,0.25);
+  --red:#ff4d4d;--orange:#ff8c00;--green:#00e676;--yellow:#ffd740;
+  --sidebar-w:280px;
+}
+html,body{height:100%;font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);overflow:hidden}
+a{color:var(--cyan);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* Layout */
+.app{display:flex;height:100vh;flex-direction:column}
+.header{
+  height:56px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 24px;background:var(--surface);border-bottom:1px solid var(--border);
+  flex-shrink:0;z-index:10;
+}
+.header-left{display:flex;align-items:center;gap:12px}
+.header-logo{font-size:18px;font-weight:700;letter-spacing:-0.5px;color:#fff}
+.header-logo span{color:var(--cyan)}
+.header-right{display:flex;align-items:center;gap:16px}
+.badge{
+  display:inline-flex;align-items:center;gap:6px;padding:4px 12px;
+  border-radius:20px;font-size:12px;font-weight:500;
+}
+.badge-cyan{background:var(--cyan-dim);color:var(--cyan);border:1px solid rgba(0,209,255,0.2)}
+.badge-orange{background:rgba(255,140,0,0.1);color:var(--orange);border:1px solid rgba(255,140,0,0.2)}
+.badge-green{background:rgba(0,230,118,0.1);color:var(--green);border:1px solid rgba(0,230,118,0.2)}
+.timestamp{font-size:12px;color:var(--text3)}
+
+.main{display:flex;flex:1;overflow:hidden}
+
+/* Sidebar */
+.sidebar{
+  width:var(--sidebar-w);min-width:var(--sidebar-w);background:var(--surface);
+  border-right:1px solid var(--border);display:flex;flex-direction:column;
+  overflow-y:auto;padding:16px 0;
+}
+.sidebar::-webkit-scrollbar{width:4px}
+.sidebar::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+.sidebar-section{margin-bottom:24px}
+.sidebar-section-title{
+  font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;
+  color:var(--text3);padding:0 20px;margin-bottom:8px;
+}
+.sidebar-item{
+  display:flex;align-items:center;gap:12px;padding:10px 20px;
+  cursor:pointer;transition:all 0.15s ease;font-size:14px;color:var(--text2);
+  border-left:3px solid transparent;
+}
+.sidebar-item:hover{background:var(--surface2);color:var(--text)}
+.sidebar-item.active{
+  background:var(--cyan-dim);color:var(--cyan);
+  border-left-color:var(--cyan);
+}
+.sidebar-item .icon{
+  width:20px;height:20px;display:flex;align-items:center;justify-content:center;
+  font-size:16px;flex-shrink:0;
+}
+.sidebar-item .label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sidebar-item .tag{
+  margin-left:auto;font-size:10px;padding:2px 6px;border-radius:4px;
+  font-weight:600;flex-shrink:0;
+}
+.tag-critical{background:rgba(255,77,77,0.15);color:var(--red)}
+
+/* Content */
+.content{flex:1;overflow-y:auto;padding:0}
+.content::-webkit-scrollbar{width:6px}
+.content::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+.alert-banner{
+  background:linear-gradient(135deg,rgba(255,77,77,0.12),rgba(255,140,0,0.08));
+  border:1px solid rgba(255,77,77,0.25);border-radius:8px;
+  padding:14px 20px;margin:20px 32px 0;display:flex;align-items:center;gap:12px;
+  cursor:pointer;transition:all 0.2s;
+}
+.alert-banner:hover{border-color:rgba(255,77,77,0.5);background:linear-gradient(135deg,rgba(255,77,77,0.18),rgba(255,140,0,0.12))}
+.alert-icon{font-size:20px;flex-shrink:0}
+.alert-text{font-size:13px;color:var(--text)}
+.alert-text strong{color:var(--red)}
+
+.doc-container{
+  max-width:860px;margin:0 auto;padding:32px 40px 80px;
+  animation:fadeIn 0.2s ease;
+}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* Markdown styles */
+.doc-container h1{
+  font-size:28px;font-weight:700;color:#fff;margin-bottom:8px;
+  padding-bottom:12px;border-bottom:1px solid var(--border);letter-spacing:-0.5px;
+}
+.doc-container h2{
+  font-size:22px;font-weight:600;color:#fff;margin-top:36px;margin-bottom:12px;
+  padding-bottom:8px;border-bottom:1px solid var(--border);
+}
+.doc-container h3{font-size:17px;font-weight:600;color:var(--cyan);margin-top:24px;margin-bottom:8px}
+.doc-container h4{font-size:15px;font-weight:600;color:var(--text);margin-top:20px;margin-bottom:6px}
+.doc-container p{line-height:1.7;margin-bottom:12px;font-size:14.5px;color:var(--text)}
+.doc-container strong{color:#fff;font-weight:600}
+.doc-container em{color:var(--text2);font-style:italic}
+.doc-container ul,.doc-container ol{margin:8px 0 16px 24px;line-height:1.7;font-size:14.5px}
+.doc-container li{margin-bottom:4px}
+.doc-container blockquote{
+  border-left:3px solid var(--cyan);padding:8px 16px;margin:12px 0;
+  background:var(--cyan-dim);border-radius:0 6px 6px 0;
+}
+.doc-container blockquote p{color:var(--text);margin-bottom:0}
+.doc-container hr{border:none;border-top:1px solid var(--border);margin:28px 0}
+.doc-container code{
+  font-family:'JetBrains Mono',monospace;font-size:13px;
+  background:var(--surface3);padding:2px 6px;border-radius:4px;color:var(--cyan);
+}
+.doc-container pre{
+  background:var(--surface2) !important;border:1px solid var(--border);
+  border-radius:8px;padding:16px;margin:12px 0 16px;overflow-x:auto;
+}
+.doc-container pre code{
+  background:transparent !important;padding:0;color:var(--text);
+  font-size:13px;line-height:1.6;
+}
+.doc-container table{
+  width:100%;border-collapse:collapse;margin:12px 0 20px;font-size:13.5px;
+}
+.doc-container th{
+  text-align:left;padding:10px 14px;background:var(--surface2);
+  border:1px solid var(--border);color:var(--cyan);font-weight:600;
+  font-size:12.5px;text-transform:uppercase;letter-spacing:0.5px;
+}
+.doc-container td{
+  padding:9px 14px;border:1px solid var(--border);color:var(--text);
+  vertical-align:top;
+}
+.doc-container tr:hover td{background:var(--surface2)}
+
+/* Responsive */
+@media(max-width:900px){
+  .sidebar{width:220px;min-width:220px}
+  .doc-container{padding:24px 20px 60px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <div class="header-left">
+      <div class="header-logo"><span>Hyper</span>Retrieval Research Lab</div>
+    </div>
+    <div class="header-right">
+      <span class="badge badge-cyan">4 Brainstorms</span>
+      <span class="badge badge-green">1 Synthesis</span>
+      <span class="badge badge-orange">1 Critical Finding</span>
+      <span class="timestamp">Updated: 2026-03-31</span>
+    </div>
+  </header>
+  <div class="main">
+    <nav class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Persona Brainstorms</div>
+        <div class="sidebar-item active" data-panel="business">
+          <div class="icon">&#128188;</div>
+          <div class="label">Business Perspective</div>
+        </div>
+        <div class="sidebar-item" data-panel="product">
+          <div class="icon">&#128230;</div>
+          <div class="label">Product Teardown</div>
+        </div>
+        <div class="sidebar-item" data-panel="scientist">
+          <div class="icon">&#128248;</div>
+          <div class="label">ML Scientist Memo</div>
+        </div>
+        <div class="sidebar-item" data-panel="explorer">
+          <div class="icon">&#127760;</div>
+          <div class="label">Explorer Findings</div>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Synthesis</div>
+        <div class="sidebar-item" data-panel="synthesis">
+          <div class="icon">&#128172;</div>
+          <div class="label">Cross-Persona Debate</div>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Findings</div>
+        <div class="sidebar-item" data-panel="critical">
+          <div class="icon">&#9888;&#65039;</div>
+          <div class="label">Co-Change Naming Bug</div>
+          <span class="tag tag-critical">CRITICAL</span>
+        </div>
+        <div class="sidebar-item" data-panel="complementarity">
+          <div class="icon">&#128200;</div>
+          <div class="label">Complementarity Analysis</div>
+        </div>
+      </div>
+    </nav>
+    <main class="content" id="content">
+      <div class="alert-banner" id="alertBanner" onclick="switchPanel('critical')">
+        <div class="alert-icon">&#9888;&#65039;</div>
+        <div class="alert-text">
+          <strong>CRITICAL FINDING:</strong> Co-change index naming mismatch silently breaks blast radius for ~95% of Haskell queries.
+          The #1 competitive advantage is non-functional. Click to view details.
+        </div>
+      </div>
+      <div class="doc-container" id="docContainer"></div>
+    </main>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Embedded markdown content from research files
+// ============================================================
+const panels = {};
+
+panels.business = `# HyperRetrieval: Business Perspective Brainstorm
+
+**Author:** VP Engineering (Internal Memo)
+**Date:** 2026-03-31
+**Classification:** Internal \u2014 Not for distribution
+
+---
+
+## 1. Market Reality: What Actually Breaks When Large Orgs Use AI Agents
+
+Let\u2019s stop pretending that AI coding assistants "just work" at scale. Here\u2019s what actually happens when you deploy them across 500+ engineers and 50+ microservices:
+
+**Hallucination at the seams.** LLMs are decent at single-file edits. They fall apart at service boundaries. An engineer asks "how does the payment retry flow work?" and the LLM confidently describes a flow that hasn\u2019t existed since 2024. Why? Because the retry logic spans euler-api-txns, euler-api-gateway, and the drainer service, and the LLM has no way to follow that chain. It has a context window, not a codebase understanding.
+
+**Tribal knowledge stays tribal.** The most expensive questions in any large org aren\u2019t "how does this function work?" \u2014 they\u2019re "why was it built this way?" and "what else breaks if I change this?" These answers live in git history, Slack threads, and the heads of 3 senior engineers who\u2019ve been here since 2019. No AI tool touches this today.
+
+**Context window theatre.** Copilot and Cursor give you the illusion of codebase awareness by stuffing your current file and a few neighbors into context. For a monorepo or a tightly-coupled microservice mesh like ours (42,467 import edges, 8,706 cross-service), that\u2019s like reading one chapter of a novel and claiming you understand the plot.
+
+**The "works on my machine" problem, AI edition.** Engineer A gets a great answer because they happened to have the right files open. Engineer B asks the same question, gets garbage. There\u2019s no shared, consistent index. Every session starts from zero.
+
+**Security and compliance are afterthoughts.** Every enterprise CISO I\u2019ve talked to has the same question: "Where does my code go?" Most AI tools phone home. Most can\u2019t run fully air-gapped. For a payment orchestrator handling billions in transactions, this isn\u2019t a nice-to-have \u2014 it\u2019s a blocker.
+
+---
+
+## 2. Where HyperRetrieval Fits: Tool, Platform, or Infrastructure?
+
+Let\u2019s be precise about what we\u2019ve built:
+
+**It\u2019s infrastructure masquerading as a tool.** The retrieval engine (retrieval_engine.py) is a stateless library that loads a pre-built index and exposes search/traversal functions. The Chainlit UI and MCP server are thin shells on top. This is the right architecture \u2014 but it means we\u2019re selling plumbing, not faucets.
+
+**The buyer and the user are different people.**
+- **Buyer:** VP/Director of Engineering, or a Platform Engineering lead. They care about: reduced onboarding time, fewer production incidents from misunderstood code, developer productivity metrics.
+- **User:** Individual engineers, especially mid-level ones working on unfamiliar services. They care about: "Can I get an answer in 30 seconds instead of 45 minutes of grep + Slack?"
+- **The gap:** The buyer needs dashboards, adoption metrics, and ROI numbers. The user needs it to be faster than grep. We serve the user today. We don\u2019t serve the buyer at all.
+
+**It\u2019s not a developer tool in the Copilot sense.** Copilot writes code for you. HyperRetrieval helps you understand code before you write it. These are fundamentally different value propositions. We\u2019re closer to Sourcegraph (code intelligence) than Copilot (code generation). This matters for positioning.
+
+**Where it actually sits:**
+
+\`\`\`
+Code Generation (Copilot, Cursor)     <-- we are NOT here
+        |
+Code Understanding (HyperRetrieval)   <-- we ARE here
+        |
+Code Search (Sourcegraph, grep)       <-- we started here, moved up
+\`\`\`
+
+---
+
+## 3. Competitive Moat: Honest Assessment
+
+### What HyperRetrieval has that competitors don\u2019t:
+
+1. **Graph-aware retrieval.** We don\u2019t just search text \u2014 we traverse call graphs (trace_callers, trace_callees) and import graphs (4,809 modules, 42,467 edges). When an engineer asks "what calls this function?", we give a real answer, not a regex match. GitHub Copilot and Cursor have zero graph awareness.
+
+2. **Co-change intelligence.** Our co-change index (111,005 module pairs from git history) answers the question no other tool can: "When module X changes, what else usually changes with it?" This is gold for blast radius analysis and PR review. Sourcegraph Cody doesn\u2019t have this.
+
+3. **Leiden clustering with LLM summaries.** We\u2019ve clustered 94,244 symbols into semantically coherent groups and generated human-readable summaries. This means an engineer can navigate from "I need to understand payment tokenization" to the exact module cluster in 2 tool calls. Nobody else does structural clustering of codebases.
+
+4. **Self-hosted, air-gapped capable.** The entire stack runs on a single machine (WSL2 with a GPU). No code leaves the premises. For regulated industries (payments, healthcare, defense), this is table stakes that most competitors fail.
+
+5. **MCP-native.** We expose 8 tools via MCP, which means any MCP-compatible client (Claude Code, Cursor, Windsurf) can use our index natively. We\u2019re not locked to one IDE.
+
+### What competitors have that we don\u2019t:
+
+1. **Distribution.** Copilot has 1.8M+ paying users. Cursor has viral developer love. Sourcegraph has enterprise sales teams. We have a demo running on a WSL2 instance. Distribution eats product for breakfast.
+
+2. **Write-path integration.** Copilot and Cursor generate code. We only help you understand code. Engineers spend 70% of their time reading code, so our TAM is real \u2014 but "it writes code for me" is an easier sell than "it helps me understand code faster."
+
+3. **Multi-language, zero-config.** Copilot works the moment you install it, in any language, any repo. HyperRetrieval requires a build pipeline (7 steps: extract, graph, embed, summarize, package, co-change, docs). That\u2019s a significant adoption barrier.
+
+4. **Real-time index updates.** Our index is built in batch. If someone merges a PR at 2pm, the index doesn\u2019t know about it until the next rebuild. Sourcegraph has near-real-time indexing. This matters more than we want to admit.
+
+5. **Polish and UX.** Let\u2019s be honest \u2014 our Chainlit UI is functional but not beautiful. Copilot and Cursor have had hundreds of millions of dollars in UX investment. We\u2019re competing with a PhD thesis project aesthetic.
+
+### The real moat question:
+
+Can GitHub/Microsoft add graph traversal and co-change analysis to Copilot? Technically, yes. Will they? Not for 2-3 years. They\u2019re focused on code generation, not code understanding. That\u2019s our window.
+
+Can Sourcegraph add LLM-powered graph retrieval? They\u2019re trying (Cody). But they\u2019re building on top of a search engine, not a graph. Retrofitting graph intelligence onto text search is hard. We started with the graph. That\u2019s a genuine architectural advantage.
+
+---
+
+## 4. Adoption Barriers: Why 50 Engineers Would Say No
+
+**Barrier 1: "I already have Copilot."**
+Most engineers don\u2019t distinguish between code generation and code understanding. They\u2019ll say "Copilot already does that" even when it demonstrably doesn\u2019t. We need a 30-second demo that shows a question Copilot gets catastrophically wrong and HyperRetrieval nails. Something cross-service, something that requires following a call chain through 3 services.
+
+**Barrier 2: Setup cost is non-trivial.**
+The build pipeline has 7 steps. It needs a GPU for embeddings (or a cloud embedding provider). It needs ~8GB RAM at runtime. For a team evaluating tools, this is "I\u2019ll try it next quarter" territory. Compare to Copilot: install extension, done.
+
+**Barrier 3: Stale index = broken trust.**
+One wrong answer from a stale index and engineers will never come back. "It told me function X calls Y, but that was refactored last week." Trust is binary \u2014 you either have it or you don\u2019t. We need CI/CD integration that rebuilds the index on every merge to main. Without it, we\u2019re building on sand.
+
+**Barrier 4: No metrics = no justification.**
+An engineer might love the tool. Their manager asks "How much time does it save?" and the engineer shrugs. We have zero usage analytics, zero time-saved tracking, zero before/after comparisons. The buyer can\u2019t justify the infrastructure cost.
+
+**Barrier 5: Haskell-first perception.**
+Our deployment indexes Haskell services. Most of the world writes TypeScript, Python, Java, and Go. If the first thing a prospective user sees is Haskell examples, they\u2019ll assume it doesn\u2019t work for them. We support 5 languages (Haskell, Rust, JS/TS, Python, Groovy) but lead with the niche one.
+
+---
+
+## 5. The Enterprise Elephant: What Breaks at 500 Engineers, 200 Repos, 15 Teams
+
+**Memory.** Right now, 12 services / 94K symbols requires ~8GB RAM. Linear extrapolation to 200 repos means 130GB+. That\u2019s not a server \u2014 that\u2019s a cluster. We need sharding, lazy loading, or a fundamentally different storage architecture. LanceDB helps on the vector side, but the NetworkX graph is fully in-memory.
+
+**Build time.** The 7-step pipeline on 12 repos takes hours. On 200 repos it takes days. We need incremental builds \u2014 only re-index what changed. The co-change index (1.1GB git history JSON) will be 20GB+ at scale. This is the first thing that breaks.
+
+**Multi-tenancy and access control.** Team A should not see Team B\u2019s proprietary service internals. Today, every user sees everything. At enterprise scale, we need per-team index partitions, role-based access, and audit logs. This is 6 months of platform engineering work.
+
+**Embedding model consistency.** "Embedding dimension is fixed at index build time" (from the known pitfalls). If 15 teams are using different embedding providers or model versions, nothing works. We need a centralized embedding service with versioning. The embed_server.py is a start, but it\u2019s single-instance.
+
+**Organizational politics.** This is the real killer. Team leads will ask: "Who owns this? Who\u2019s on-call? What\u2019s the SLA? What happens when it goes down during an incident?" If the answer is "the guy who built it runs it on his laptop," adoption dies. We need an operational model before we need more features.
+
+**Configuration drift.** 15 teams means 15 config.yaml files, 15 sets of domain-specific allowlists, 15 opinions about what "relevant" means. The config system needs to support hierarchical overrides (org defaults > team overrides > personal preferences) or it becomes unmaintainable.
+
+---
+
+## 6. Revenue/Impact Case
+
+### The math:
+
+- **Engineers:** 500
+- **Fully-loaded cost per engineer:** $150,000/year (India-adjusted for a top-tier fintech)
+- **Working hours per year:** 2,000
+- **Cost per engineer-hour:** $75
+- **Time saved per engineer per day:** 30 minutes = 0.5 hours
+- **Working days per year:** 250
+- **Annual savings per engineer:** 0.5 x 250 x $75 = **$9,375**
+- **Total annual savings (500 engineers):** **$4,687,500**
+
+### Is that enough?
+
+Infrastructure cost estimate:
+- GPU server for embeddings: $15,000/year (cloud) or $8,000 one-time (on-prem)
+- Application servers (sharded, HA): $30,000/year
+- Engineering team to maintain (2 FTE): $300,000/year
+- **Total annual cost: ~$350,000**
+
+**ROI: ~13x.** That\u2019s compelling on paper.
+
+### Why the math lies:
+
+1. **"30 minutes per day" is aspirational.** In practice, most engineers will use it 2-3 times per week, not 8 times per day. Realistic savings: 5-10 minutes/day average across the org. That drops the ROI to 2-4x. Still positive, but not a slam dunk.
+
+2. **Adoption is never 100%.** If 30% of engineers actually use it regularly (which would be excellent adoption for any dev tool), effective savings drop to $1.4M. Still good, but the "500 engineers" number is misleading.
+
+3. **The real value isn\u2019t time saved \u2014 it\u2019s incidents prevented.** One production incident from misunderstood cross-service coupling costs $50K-$500K (engineer time, revenue impact, customer trust). If HyperRetrieval prevents 3-5 incidents per year through better blast radius analysis, that\u2019s worth more than the time savings. But this is nearly impossible to measure.
+
+4. **The hardest value to quantify: onboarding.** A new engineer takes 3-6 months to become productive in a codebase like ours. If HyperRetrieval cuts that to 1-2 months, the value per new hire is enormous \u2014 but only visible in retrospect.
+
+### Bottom line:
+
+The ROI case is real but fragile. It depends entirely on adoption rate. A tool that 30% of engineers use 3x/week is worth $1-2M/year. A tool that 80% of engineers use daily is worth $4-5M/year. The difference is not in the product \u2014 it\u2019s in the rollout strategy, the UX polish, and the organizational buy-in.
+
+---
+
+## 7. What\u2019s Actually Missing: Top 5 Organizational Capabilities
+
+These are not ML improvements. These are the things that would make me, as a VP of Engineering, actually bet my reputation on deploying this.
+
+### 1. CI/CD Integration (Index Freshness Pipeline)
+
+The index must rebuild automatically on every merge to main. Not nightly \u2014 on merge. Engineers need to trust that the answer reflects the code as of the last merged PR. This means:
+- A GitHub Actions / Jenkins pipeline that runs incremental re-indexing
+- A webhook that notifies the running server to hot-reload updated artifacts
+- A staleness indicator in the UI ("Index last updated: 3 hours ago")
+
+Without this, we\u2019re shipping a product with an expiration date on every answer.
+
+### 2. Usage Analytics and Impact Dashboard
+
+I need to see:
+- How many queries per day, per team, per service
+- Which tools are used most (search_symbols vs trace_callers vs get_blast_radius)
+- Average query-to-answer time
+- "Confidence score" distribution (are we returning good results?)
+- A weekly email to engineering leads: "Your team asked 47 questions this week. Top topics: payment retry flow, UPI callback handling, settlement reconciliation."
+
+This isn\u2019t vanity metrics \u2014 it\u2019s how I justify the infrastructure budget and identify which teams need more documentation.
+
+### 3. PR Review Integration (Blast Radius as a CI Check)
+
+The pr_analyzer.py exists but it should be a first-class GitHub Check that runs on every PR:
+- "This PR changes 3 files in euler-api-txns. Based on co-change history, you should also check: [list of modules with >70% co-change probability]"
+- "This PR modifies function X which is called by 14 other functions across 3 services. Here are the callers: [list]"
+- Auto-tag reviewers from teams that own the affected downstream services
+
+This is the highest-value integration we could build because it\u2019s passive \u2014 engineers don\u2019t have to remember to use it. It\u2019s just there, on every PR.
+
+### 4. Onboarding Mode (Guided Codebase Walkthrough)
+
+New engineers should be able to say: "I\u2019m joining the payments team. Walk me through the codebase." And get:
+- A top-down map: "Here are the 12 services, here\u2019s how they connect, here\u2019s what each one does" (we have Leiden cluster summaries \u2014 use them)
+- A guided deep-dive: "You\u2019ll mostly work in euler-api-txns. Here are the 5 most important modules, and here\u2019s how data flows through them"
+- Interactive exploration: "Now ask me anything about what you\u2019ve seen"
+
+This turns a 3-month onboarding into a 3-week onboarding. That\u2019s measurable, visible, and something every engineering leader would pay for.
+
+### 5. Organizational Knowledge Layer (Beyond Code)
+
+Code is only half the story. We need to index:
+- **Architecture Decision Records (ADRs):** Why was the payment retry logic moved from the gateway to the drainer? The code shows it happened, but not why.
+- **Runbooks and incident postmortems:** "The last time settlement reconciliation broke, here\u2019s what happened and here\u2019s how it was fixed."
+- **API contracts and schemas:** What does the response from euler-api-gateway look like? What are the valid values for payment_status?
+- **Slack/Teams threads** (with consent): The real design decisions happen in chat. If we can index and retrieve from those (with proper access controls), we\u2019re 10x more valuable than any code search tool.
+
+The 07_chunk_docs.py pipeline exists for markdown docs. Extend it to ADRs, runbooks, and API specs. That\u2019s where the "tribal knowledge" lives, and that\u2019s what makes senior engineers irreplaceable. If we can democratize that knowledge, we change the game.
+
+---
+
+## Summary: The Honest Verdict
+
+HyperRetrieval is solving a real problem \u2014 the hardest one in developer tooling, actually. Code understanding at scale is where every AI coding tool falls apart, and we have genuine technical differentiation (graph traversal, co-change analysis, structural clustering).
+
+But we\u2019re a prototype with production aspirations. The gap between "impressive demo" and "enterprise-grade platform" is:
+
+| We have | We need |
+|---------|---------|
+| Batch-built index | CI/CD incremental rebuild |
+| Single-instance, in-memory | Sharded, multi-tenant |
+| No usage tracking | Full analytics dashboard |
+| CLI/chat interface | PR integration, IDE-native |
+| Code-only index | Code + docs + ADRs + runbooks |
+| "It works on beast\u2019s laptop" | Operational model with SLA |
+
+The technology is ahead of the packaging. That\u2019s the best kind of problem to have \u2014 but only if we close the gap before GitHub adds graph traversal to Copilot.
+
+**Clock is ticking. We have 18-24 months.**
+
+---
+
+*This memo reflects my honest assessment as of March 2026. Challenge any of these assumptions \u2014 that\u2019s the point.*`;
+
+panels.product = `# HyperRetrieval: Brutally Honest Product Teardown
+
+**Author:** Senior PM, 3 months daily usage
+**Date:** 2026-03-31
+**Deployment:** 94,244 symbols, 12 Haskell microservices, Chainlit chat UI + \`hrcode\` CLI
+
+---
+
+## 1. First 5 Minutes: The New Engineer Experience
+
+**What actually happens:** You hit the Chainlit URL, get a login screen with username/password. No SSO, no Google login -- just a raw password form. First-time users are auto-registered, which is nice, but there is zero indication of this. An engineer who types a wrong password on their "first login" has now created an account with that wrong password.
+
+**The onboarding flow is good but front-loaded.** The welcome message shows a table of example queries ("Trace a payment flow", "Understand a module", etc.) and then presents six starter buttons. This is the right idea. But:
+
+- **No system status indicator.** The data takes ~35 seconds to load (embed server GPU warmup). If a new user types a question before \`load_all()\` finishes, what happens? They get a cryptic failure or empty results. There is no loading bar, no "warming up" toast, nothing.
+- **No documentation link.** No "How this works" page. No explanation that this is a ReAct agent that calls tools against an index. Engineers do not know what the system can and cannot do.
+- **No codebase overview.** 94k symbols across 12 services, but nowhere does the UI say "here are the 12 services, here is how big each one is, here is what each one does." The starters assume you already know what euler-api-txns and UCS are.
+- **The starters are domain-specific.** "How does UPI Collect work?" is useless to an engineer who works on settlement. There is no personalization, no role-based starter sets.
+- **File upload is disabled** (\`spontaneous_file_upload.enabled = false\`). An engineer cannot paste a stack trace or upload a log file. This is a fundamental gap for an investigation tool.
+
+**What is missing:**
+- A 30-second animated walkthrough showing the ReAct loop in action
+- A "What services are indexed?" sidebar panel
+- An indication of freshness ("Index last updated: 2 hours ago")
+- SSO integration (every enterprise expects this)
+
+---
+
+## 2. The Query Gap: Questions Engineers Want to Ask But Cannot
+
+### Questions the system handles well:
+- "How does function X work?" (search_symbols + get_function_body)
+- "Who calls X?" (trace_callers)
+- "What would break if I change file Y?" (get_blast_radius)
+
+### Questions the system cannot answer:
+
+| Question | Why it fails | What would fix it |
+|----------|-------------|-------------------|
+| "What changed in the last sprint?" | No git history integration in the query path. \`git_history.json\` exists but is only used for co-change index building, not real-time queries. | Add a \`get_recent_changes(service, days)\` tool that queries git log. |
+| "Who owns this module?" | No ownership data. No CODEOWNERS parsing. No team mapping. | Ingest CODEOWNERS files. Add \`get_owner(module)\` tool. |
+| "Is this function safe to delete?" | Blast radius shows import-level impact, but cannot tell you about runtime reflection, config-driven dispatch, or template references. | Add dead code analysis. Cross-reference with runtime call logs if available. |
+| "Show me all the places we handle timeouts" | Semantic search finds some, but "timeout" is a pattern (try/catch with specific exception types, config values), not a symbol name. | Add pattern-based search: grep over source with semantic ranking. The \`grep_files\` tool exists in the CLI but is not surfaced prominently. |
+| "What is the API contract for this endpoint?" | No OpenAPI/Swagger ingestion. The system indexes Haskell AST but does not extract HTTP route definitions as first-class objects. | Parse route definitions. Build an endpoint registry. |
+| "How does this compare to how it worked 6 months ago?" | No historical index. One snapshot in time. | Maintain versioned indexes or diff against git history. |
+| "What are the known bugs in this area?" | No Jira/issue tracker integration. | Add a \`search_issues(query)\` tool backed by Jira API. |
+| "Show me the data model for orders" | Types are indexed as symbols, but there is no ERD or relationship view. You have to manually call \`get_function_body\` on each type. | Add a \`get_data_model(entity)\` tool that collects all related types and their field relationships. |
+
+The fundamental gap: **HyperRetrieval knows code structure but not code history, code ownership, or code intent.** It is a spatial map without a temporal dimension.
+
+---
+
+## 3. The Response Problem: 15 Tool Calls and 90 Seconds of Silence
+
+### What the log data tells us
+
+From the retrieval log, a typical deep investigation query (like the auto-refund split payment example) triggers 4+ tool calls, each taking 1-4 seconds, with the full conversation easily exceeding 60 seconds wall time. The first token time (TTFT) for even simple queries is ~8 seconds (logged as \`ttft_ms: 7976\`).
+
+### The waiting experience
+
+**Chainlit shows tool calls as collapsible "Steps"** -- this is the right UX pattern. The engineer can see \`search_modules("auto refund")\` completing, then \`get_module("Product.OLTP.Services.AutoRefundService")\`, and so on. Chain-of-thought display is set to \`cot = "full"\`, so reasoning is visible.
+
+**But the problems are real:**
+
+1. **No progress indicator.** There is no "Step 3 of ~8" estimate. The engineer does not know if they are 20% done or 90% done. They see steps appearing but have no mental model of when the answer will arrive.
+
+2. **No early signal of answer quality.** After 60 seconds of tool calls, the final answer might be "I could not find enough information about this." The engineer just wasted a minute. The system should surface confidence early: "I found 3 relevant modules, assembling answer..." vs "I\u2019m struggling to find relevant code for this query."
+
+3. **Tab-away problem.** Engineers tab away after ~15 seconds. No browser notification when the answer is ready. No sound. No desktop notification API integration. The answer sits unseen.
+
+4. **The 50-call ceiling is too high.** \`MAX_TOOL_CALLS = 50\` means a runaway loop can burn 3+ minutes. The CLAUDE.md says 12 is the real target. The gap between 12 (documented) and 50 (code) suggests the ceiling was raised to handle edge cases, but it also means worst-case latency is unbearable.
+
+5. **Token economics are invisible.** The log shows \`in_tokens: 3658, out_tokens: 255\` for simple queries but the deep queries accumulate massive context. Engineers have no idea they are consuming expensive LLM tokens. This matters when leadership asks "why is our API bill $X?"
+
+### What engineers actually do:
+
+- **Simple questions (< 15s):** They wait. Acceptable.
+- **Medium questions (15-45s):** They start reading the tool call steps. This is actually valuable -- they learn the codebase structure by watching the agent navigate. But most do not realize this.
+- **Long questions (45s+):** They tab away. They may forget they asked. They may ask the same question again in a new tab.
+
+### Fixes:
+
+- **Streaming partial answers.** After 3 tool calls, stream a preliminary "Here is what I have found so far..." paragraph, then continue investigating.
+- **Browser notifications.** \`Notification.requestPermission()\` on first visit. Fire when answer is ready.
+- **Estimated time remaining.** Track historical query-to-answer times by query type. Show "Usually takes 30-60 seconds for this type of question."
+- **Cancel button.** Let the user abort a long-running investigation and get whatever partial results exist.
+
+---
+
+## 4. The 10x Features: What Would Make Engineers Come Back Daily
+
+### 4a. VS Code Extension -- "Answer about the file you are editing"
+
+**Impact: HIGH. This is where engineers live.**
+
+Right now, to ask about a function, you: open browser, navigate to HR, type the question, wait, read the answer, then go back to VS Code. That is 4 context switches.
+
+A VS Code extension that adds a sidebar panel: select a function, right-click "Explain this", "Who calls this?", "What breaks if I change this?" -- the answer appears in a panel next to your code. Zero context switches.
+
+The MCP server already exists on port 8002. A VS Code extension just needs to be a thin client. The hard part is not building it -- it is making it fast enough that engineers prefer it over Cmd+clicking through the code themselves.
+
+**Concrete implementation:** A CodeLens provider that adds "Callers (7) | Callees (3) | Blast Radius" above each function definition. Clicking any of these opens a panel with the results. No LLM needed for these -- they are direct index lookups, sub-second.
+
+### 4b. PR Review Assistant -- "Auto-analyze every PR for blast radius"
+
+**Impact: VERY HIGH. This is the first feature that delivers value without the engineer asking.**
+
+Today: engineer opens a PR, manually checks which files changed, mentally traces dependencies. With HR: a GitHub Action runs \`pr_analyzer.py\` (which already exists in \`serve/\`), posts a comment on the PR showing blast radius, co-change history, and cross-service impact.
+
+**The key insight:** This is the only feature that can be **push-based** rather than pull-based. Every other feature requires the engineer to decide to use HR. This one runs automatically.
+
+What the PR comment should show:
+- Files changed and their blast radius (import graph + co-change)
+- Cross-service boundaries crossed (e.g., "This PR touches euler-api-txns but co-change history shows euler-api-gateway usually changes with these modules")
+- Functions with high caller counts that were modified (high-risk changes)
+- New functions that have no callers yet (dead code alert)
+- A confidence score: "This is a low-risk change" vs "This change has wide impact across 3 services"
+
+### 4c. Incident Responder -- "Paste an error, get root cause analysis"
+
+**Impact: HIGH during incidents, but incidents are rare.**
+
+The flow: paste a stack trace or error message. HR extracts function names and module paths from the trace, runs \`trace_callers\` and \`trace_callees\` on each frame, cross-references with blast radius data, and presents a root cause hypothesis.
+
+**The problem:** File upload is disabled in the current config. You cannot paste a multi-line stack trace easily in a chat input. And Haskell stack traces are notoriously unhelpful (lazy evaluation, no line numbers in many cases).
+
+**What would actually help for incidents:**
+- Parse the error message for function/module names (HR already does semantic search)
+- Show the call chain leading to the failure point
+- Show recent co-changes ("this module was last changed 2 days ago, along with these other modules")
+- Link to the relevant PR that last modified the failing code
+
+### 4d. Onboarding Generator -- "Auto-create onboarding docs for new team members"
+
+**Impact: MEDIUM. High value but low frequency (new hires are infrequent).**
+
+Given a service name, generate:
+- Architecture overview (module graph visualization -- the \`generate_mindmap.py\` tool already exists)
+- Key entry points and their flows
+- Data model summary
+- Common patterns and conventions used in the codebase
+- "Start here" reading list of the 10 most important modules
+
+This is a batch job, not a real-time query. Run it once, produce a markdown doc, put it in Confluence. Update it monthly.
+
+**Priority ranking:** PR Review > VS Code Extension > Incident Responder > Onboarding Generator
+
+---
+
+## 5. What Copilot/Cursor Do Better (Honest Assessment)
+
+### Where they win:
+
+| Capability | Copilot/Cursor | HyperRetrieval |
+|-----------|---------------|----------------|
+| **Inline code completion** | Instant, in-editor, zero friction | Does not exist. HR is a question-answering tool, not a completion engine. |
+| **Edit suggestions** | "Fix this", "Refactor this" with one click | Cannot write or edit code. Read-only by design (write tools explicitly removed from chat). |
+| **Speed** | Sub-second for completions | 8+ seconds minimum (TTFT), 30-90s for deep queries. |
+| **Context window** | Cursor indexes the open project automatically | HR requires a separate build pipeline (\`01_extract.py\` through \`07_chunk_docs.py\`). Index staleness is a real issue. |
+| **IDE integration** | Native. Zero setup for the user. | Separate browser tab. Or MCP config that most engineers will not set up. |
+| **Multi-file edits** | Cursor Composer edits across files | Not applicable -- HR does not edit files. |
+
+### Where HR wins:
+
+| Capability | HyperRetrieval | Copilot/Cursor |
+|-----------|---------------|----------------|
+| **Cross-service understanding** | Indexes 12 services as one graph. Traces calls across service boundaries. | Each is limited to the open workspace. Cannot trace a function from euler-api-gateway into euler-api-txns. |
+| **Call graph accuracy** | AST-extracted, not heuristic. Shows real callers/callees. | Relies on LLM guessing from context window. Hallucinates callers regularly. |
+| **Blast radius** | Import graph + co-change history. Quantified impact. | "What files might be affected?" -- vague, incomplete, no co-change data. |
+| **Codebase-wide search** | 94k symbols searchable by semantics and keywords. Finds things across all 12 services. | Limited to open files + whatever fits in context. |
+| **Institutional knowledge** | Answers "why does this code exist?" by tracing the full dependency chain | Cannot explain legacy decisions without explicit comments. |
+
+### The honest conclusion:
+
+**Copilot/Cursor win on writing code. HR wins on understanding code.** They are complementary, not competitive. The mistake would be trying to make HR do code completion. The opportunity is making HR the knowledge layer that feeds into Copilot/Cursor via MCP.
+
+The real competitor is not Copilot -- it is **an engineer who has been at the company for 3 years and knows the codebase by heart.** HR needs to get a new hire to that level of understanding in weeks, not years.
+
+---
+
+## 6. The Trust Problem
+
+### Why engineers do not trust AI code answers:
+
+1. **Hallucination trauma.** Every engineer has seen ChatGPT confidently describe a function that does not exist. Once burned, twice shy.
+2. **No source attribution.** If the answer says "processPayment calls validateCard," the engineer wants to see the actual line of code. Not a summary -- the code.
+3. **Stale index.** If the codebase changed yesterday but the index was built last week, every answer is potentially wrong. Engineers know this.
+4. **Black box reasoning.** "The AI said so" is not an acceptable justification in a code review.
+
+### How HR is already better than generic AI (but does not advertise it):
+
+- **Every answer is grounded in tool calls.** The CoT display shows exactly which functions were looked up. This is a trust differentiator -- but it is buried in collapsible Steps that most users do not expand.
+- **Function bodies are real code.** \`get_function_body\` returns actual source, not LLM-generated approximations.
+- **Search results show module paths and symbol IDs.** These are verifiable -- the engineer can go look at the file.
+
+### What would build trust:
+
+1. **Clickable source links.** Every function name in the answer should be a hyperlink to the actual source file (GitHub URL or VS Code deeplink). Not "see AutoRefundService.hs" -- a direct link to line 47.
+
+2. **Confidence indicators.** "I found this function and read its source code [HIGH CONFIDENCE]" vs "I inferred this from module names but did not read the implementation [LOW CONFIDENCE]."
+
+3. **"Verify this" button.** One click opens the relevant source files in a new tab so the engineer can spot-check.
+
+4. **Freshness badge.** "Index built from commit \`abc1234\` (2 hours ago)" on every answer. If the index is > 24 hours old, show a warning.
+
+5. **Diff against source.** If the engineer has the repo cloned, let them run \`hrcode verify\` to check that the indexed version matches their local checkout.
+
+6. **Wrong answer reporting.** A thumbs-down button that logs the query, the answer, and the actual correct answer. Use this to build a regression test suite. Chainlit has a feedback table (\`feedbacks\`) but it only captures value/comment -- no structured "what was wrong" data.
+
+7. **Show the negative results too.** "I searched for X but found nothing" is more trustworthy than silently skipping failed searches. The logs show \`"status": "empty"\` entries but these are not surfaced to the user.
+
+---
+
+## 7. Metrics That Matter
+
+### Adoption metrics (are people using it?):
+
+| Metric | How to measure | Target |
+|--------|---------------|--------|
+| **Daily Active Users (DAU)** | Unique \`user_id\` per day in \`retrieval_log.jsonl\` | 50%+ of engineering team |
+| **Queries per user per day** | Count of conversation-type log entries per user | > 3 (indicates habitual use) |
+| **Retention (Week 1 to Week 4)** | % of users who queried in week 1 and still query in week 4 | > 60% |
+| **Session depth** | Average queries per session | > 2 (indicates follow-up questions, not drive-by) |
+| **Feature distribution** | % of queries that use CLI vs Chat vs MCP-in-IDE | Track to see which surface is winning |
+
+### Quality metrics (is it helping?):
+
+| Metric | How to measure | Target |
+|--------|---------------|--------|
+| **Answer convergence rate** | % of queries where \`converged: true\` in logs | > 90% |
+| **Tool call efficiency** | Average \`useful\` / \`total_calls\` ratio | > 70% |
+| **Empty result rate** | % of tool calls with \`status: "empty"\` | < 15% |
+| **Feedback score** | Average rating from thumbs up/down | > 4.0/5.0 |
+| **Time to first useful token** | \`ttft_ms\` from logs | < 5 seconds |
+
+### Impact metrics (is it making the team faster?):
+
+| Metric | How to measure | Baseline needed |
+|--------|---------------|-----------------|
+| **Time to understanding** | Survey: "How long did it take you to understand [X concept]?" Compare HR users vs non-users. | Requires control group. |
+| **Onboarding velocity** | Days until first meaningful PR for new hires who use HR vs those who do not. | Track by cohort. |
+| **PR review turnaround** | Time from PR opened to first substantive review comment. Does HR integration reduce it? | Measure before/after PR analyzer deployment. |
+| **Oncall MTTR** | Mean time to resolve for incidents where HR was used vs not. | Tag incidents in PagerDuty/Jira. |
+| **Code review quality** | Number of post-merge bugs in PRs reviewed with HR blast radius vs without. | Requires 3+ months of data. |
+| **Repeat question rate** | Same question asked by different engineers in a month. If HR had an FAQ, these would be self-serve. | Mine query logs for semantic duplicates. |
+
+### The metric I would start with:
+
+**"Did the engineer\u2019s next action succeed?"** After using HR, did they:
+- Submit a PR that passed CI on first try?
+- Resolve an incident faster than the team average?
+- Ask a follow-up question (engaged) or never come back (disappointed)?
+
+This requires instrumenting the workflow beyond HR itself, but it is the only metric that proves value to leadership.
+
+---
+
+## 8. The Killer Feature I Would Ship Tomorrow
+
+### PR Blast Radius Bot
+
+**One sentence:** A GitHub Action that automatically posts a structured comment on every PR showing cross-service impact, co-change warnings, and high-risk function modifications.
+
+**Why this doubles DAU overnight:**
+
+1. **Zero adoption friction.** Engineers do not need to sign up, open a browser, or change their workflow. The bot comes to them.
+2. **Visible to the entire team.** Every PR reviewer sees the comment. Curiosity drives them to the chat UI. "Oh, that blast radius tool is interesting -- what else can it do?"
+3. **Immediate, concrete value.** "This PR modifies \`shouldAutoRefundTransaction\` which has 14 callers across 3 services" is information that would take 20 minutes to gather manually. The bot delivers it in seconds.
+4. **Creates trust through repetition.** After seeing accurate blast radius comments on 50 PRs, engineers start trusting the underlying system. Trust transfers from the bot to the chat UI.
+5. **Generates content for the chat.** Engineers see the bot comment and think "I want to know more about that dependency." They open the chat UI and ask a follow-up. The bot is a lead-gen machine for the chat product.
+
+**What the PR comment looks like:**
+
+\`\`\`markdown
+## Blast Radius Analysis
+
+### Files Changed: 3 | Services Affected: 2 | Risk: MEDIUM
+
+#### Direct Impact
+- \\\`Product.OLTP.Services.AutoRefundService.shouldAutoRefundTransaction\\\`
+  - **14 callers** across euler-api-txns, euler-api-gateway
+  - Last modified: 12 days ago (PR #847)
+
+#### Co-Change Warning
+- Historically, changes to \\\`AutoRefundService\\\` co-occur with changes to
+  \\\`RefundScheduler\\\` (87% of the time). This PR does not include \\\`RefundScheduler\\\`.
+  Consider reviewing if this is intentional.
+
+#### Cross-Service Boundaries
+- This change in euler-api-txns may affect euler-api-gateway via:
+  \\\`Types.Communication.OLTP.Refund\\\` (shared type)
+
+---
+Powered by HyperRetrieval | [Ask a follow-up question](https://hr.internal.juspay.net)
+\`\`\`
+
+**Implementation effort:** LOW. \`pr_analyzer.py\` already exists. The co-change index has 111,005 module pairs. The import graph has 42,467 edges. Wire it into a GitHub Action, format the output as markdown, post via GitHub API. Two-week sprint, maximum.
+
+**This is the feature that turns HyperRetrieval from "a tool some people use" into "infrastructure the team depends on."**
+
+---
+
+## Summary: What I Would Do in the Next 90 Days
+
+| Week | Action | Expected Outcome |
+|------|--------|-----------------|
+| 1-2 | Ship PR Blast Radius Bot (GitHub Action) | Every PR gets automated impact analysis |
+| 3-4 | Add browser notifications + progress indicators to chat | Reduce tab-away abandonment by 50% |
+| 5-6 | Add clickable source links (GitHub URLs) to every function reference | Trust score improvement |
+| 7-8 | Build VS Code CodeLens extension (callers/callees/blast radius) | Engineers use HR without leaving IDE |
+| 9-10 | Add \`get_recent_changes\` and \`get_owner\` tools | Close the two biggest query gaps |
+| 11-12 | Add index freshness indicator + staleness warnings | Eliminate "is this current?" doubt |
+
+The product is solid at its core. The index quality is real. The ReAct loop works. The starters and onboarding are thoughtful. But it is trapped in a browser tab that engineers have to remember to visit. The path to indispensability runs through automation (PR bot), integration (VS Code), and trust (source links, freshness, confidence scores).
+
+Stop waiting for engineers to come to you. Go to where they already are.`;
+
+panels.scientist = `# Research Memo: HyperRetrieval from an ML Scientist\u2019s Perspective
+
+**Author:** Research brainstorm (ML/code-intelligence perspective)
+**Date:** 2026-03-31
+**System under study:** HyperRetrieval \u2014 a 6-signal code retrieval platform indexing 94K symbols across 12 Haskell/Rust microservices
+
+---
+
+## 1. What\u2019s Genuinely Novel Here
+
+### Signals no published system combines
+
+Published code retrieval systems use at most 2-3 of these signals in isolation. HyperRetrieval has all six loaded simultaneously and fused at query time:
+
+| Signal | Scale | What exists in literature | What HyperRetrieval adds |
+|--------|-------|--------------------------|--------------------------|
+| **Semantic vectors** | 94K symbols, 4096d (Qwen3-Embed-8B) | GraphCodeBERT (2021), CodeSage (2024), CodeBERT \u2014 all use smaller dims (768d), trained on Python/Java, not Haskell/Rust | Production-scale embeddings over a real enterprise Haskell codebase with cluster-purpose-enriched text (subsystem context baked into the embedding input) |
+| **BM25 keyword index** | 94K symbols | Standard in Sourcegraph, GitHub code search, Cody | Nothing novel alone \u2014 the novelty is in the RRF fusion with all other signals |
+| **Call graph** | 64K entries | CodeQL, Dependabot, Joern \u2014 static analysis tools, not retrieval | Used for *retrieval augmentation* (synthetic co-change injection, callee/caller traversal in context building), not just analysis |
+| **Import graph** | 4,809 modules, 42K edges, 8,706 cross-service | Dependabot tracks package-level deps; no system uses module-level import graphs for *retrieval ranking* | Module-level import graph with cross-service edge classification; used for blast-radius computation and context expansion |
+| **Co-change index** | 111K weighted pairs, 7,363 modules | Historage (2011), Ying et al. (2004) studied evolutionary coupling; Cody (2024) uses file-level co-edit for ranking | Module-level co-change with *weight thresholds* and *synthetic cold-start augmentation* from call graph \u2014 no published system does this bidirectional bootstrap |
+| **Leiden cluster summaries** | AI-generated business-purpose per cluster | No published code RAG system enriches embeddings with LLM-generated cluster purpose descriptions | Cluster purpose text is *part of the embedding input* (see \`node_to_text()\` in \`03_embed.py\`: \`"subsystem: {cluster_name}"\`, \`"purpose: {cluster_purpose}"\`) \u2014 the embedding itself encodes business semantics, not just code syntax |
+
+### The specific gap in the literature
+
+- **GraphCodeBERT** (Guo et al., 2021): Uses data flow edges within a single function. Does not use inter-module call graphs, import graphs, or evolutionary coupling.
+- **CodeSage** (Zhang et al., 2024): Contrastive learning on code+docs. Single-signal (semantic). No graph structure.
+- **Cody** (Sourcegraph, 2024): Uses file-level co-edit history for reranking. Does not fuse with call graph or cluster summaries. No cross-service awareness.
+- **RepoFormer** (Wu et al., 2024): Repository-level code completion. Uses file structure but not call graphs or co-change.
+- **SWE-bench** / **SWE-Agent** (Yang et al., 2024): Evaluates end-to-end patch generation, not retrieval quality in isolation.
+
+**The gap:** No published system fuses dense semantic search + BM25 + call graph + import graph + evolutionary coupling + LLM-generated cluster descriptions for code retrieval. HyperRetrieval does this with RRF fusion (\`rrf_merge()\`) and graph expansion (\`module_graph_expand()\`, \`cochange_path_traverse()\`).
+
+---
+
+## 2. Five Research Questions Worth Answering
+
+### H1: Co-change-augmented retrieval improves cross-service recall
+
+> **Hypothesis:** Adding co-change graph expansion to semantic+BM25 retrieval improves Recall@10 by >=15% for queries that span service boundaries, compared to semantic+BM25 alone.
+
+**Rationale:** Cross-service queries are the hardest case \u2014 the relevant code lives in a different namespace, different language sometimes, and has no lexical overlap with the query. Co-change captures the "these things change together in practice" signal that is invisible to both embeddings and keyword search.
+
+**Testable because:** We can construct a held-out evaluation set from the co-change index itself (modules with high co-change weight that are in different services) and measure whether the retrieval system returns the partner module.
+
+### H2: Synthetic co-change from call graphs recovers signal for cold-start modules
+
+> **Hypothesis:** For modules with <3 git commits (cold-start), synthetic co-change edges derived from the call graph recover >=60% of the co-change partners that would appear after 50+ commits.
+
+**Rationale:** \`_inject_synthetic_cochange()\` uses call graph edges with weight=0.3 to bootstrap modules that have no git history. If this is validated, it means you can deploy the system on a new repo with minimal git history and still get useful co-change signal.
+
+**Testable because:** We can simulate cold-start by masking the most recent N commits from the co-change builder and measuring overlap between synthetic edges and the real edges that would have been discovered.
+
+### H3: Cluster-purpose-enriched embeddings outperform raw code embeddings
+
+> **Hypothesis:** Embeddings generated from \`node_to_text()\` (which includes \`cluster_name\`, \`cluster_purpose\`, \`service_role\`, and \`recent_changes\`) achieve >=10% higher MRR on natural-language-to-code retrieval compared to embeddings of raw code/signature text alone.
+
+**Rationale:** \`node_to_text()\` injects 5 signals beyond the code itself: subsystem name, purpose description, external dependencies, recent commit messages, and service role. This is a form of *metadata-augmented embedding* that hasn\u2019t been benchmarked in the code retrieval literature.
+
+**Testable because:** We can re-embed a subset of nodes with a stripped-down \`node_to_text()\` (code-only) and compare retrieval quality on a held-out query set.
+
+### H4: RRF fusion of 3+ heterogeneous signals outperforms any single signal and any 2-signal combination
+
+> **Hypothesis:** RRF fusion of semantic vectors + BM25 + co-change graph traversal achieves a higher NDCG@20 than any single signal or any pairwise combination, with the marginal contribution of the third signal being >=5%.
+
+**Rationale:** The current \`unified_search()\` fuses vector + BM25 via RRF. But co-change is only used in \`get_blast_radius()\`, not in the main search path. Integrating co-change into the main RRF fusion would be a new contribution.
+
+**Testable because:** Ablation study \u2014 run the same query set with {vector}, {BM25}, {co-change}, {vector+BM25}, {vector+co-change}, {BM25+co-change}, {all three} and compare NDCG.
+
+### H5: Import graph structure predicts co-change probability
+
+> **Hypothesis:** Module pairs connected by import edges are >=3x more likely to co-change (weight>=3 in the co-change index) than pairs at import-distance >=3, and this predictive power holds after controlling for service membership.
+
+**Rationale:** This tests whether the import graph and co-change graph carry redundant or complementary information. If import proximity strongly predicts co-change, the signals are partially redundant. If not, they are genuinely complementary and worth fusing.
+
+**Testable because:** We have both graphs fully materialized. A logistic regression with features {import_distance, same_service, same_cluster} predicting {co-change >= 3} would answer this directly.
+
+---
+
+## 3. Data Analysis to Run First (Before Any ML Training)
+
+### 3.1 Co-change signal quality
+
+1. **Weight distribution:** Histogram of co-change weights across all 111K pairs. Is it power-law? What fraction of pairs have weight >= 10 (strong signal) vs. weight = 3 (minimum threshold, possibly noise)?
+
+2. **Cross-service vs. intra-service ratio:** What fraction of co-change pairs cross service boundaries? If <5%, the co-change signal is mostly capturing intra-module locality (redundant with import graph). If >15%, it\u2019s capturing real cross-service coupling.
+
+3. **Temporal stability:** Split git history into first-half and second-half. Compute co-change on each half separately. What is the Jaccard similarity of the top-10 partners per module? If <0.3, the signal is unstable and probably noise. If >0.5, it\u2019s a real structural property.
+
+4. **Mega-commit contamination:** The builder skips commits touching >40 files. What fraction of total commits are skipped? What is the average weight contributed by commits in the 30-40 file range (potential near-mega-commits that add noise)?
+
+### 3.2 Import graph structure
+
+5. **Degree distribution:** In-degree and out-degree of the module import graph. Identify hub modules (high in-degree = widely imported, e.g., \`euler-db\` types). These hubs will dominate any graph-based expansion.
+
+6. **Cross-service edge density:** 8,706 of 42K edges are cross-service (~20%). Which service pairs have the densest cross-service coupling? This tells us where co-change signal is most likely to add value.
+
+### 3.3 Call graph coverage
+
+7. **Call graph vs. import graph overlap:** For every edge in the import graph, does the call graph have at least one function-level call? The gap reveals modules that are imported but never directly called (type-only imports, re-exports).
+
+8. **Synthetic co-change coverage:** After \`_inject_synthetic_cochange()\`, how many modules go from 0 co-change partners to >0? What is the average number of synthetic vs. real partners?
+
+### 3.4 Cluster quality
+
+9. **Cluster size distribution:** How many nodes per Leiden cluster? Clusters of size 1 are noise. Clusters of size >500 are too coarse.
+
+10. **Cluster-service alignment:** Do clusters align with service boundaries, or do they span services? Cross-service clusters are the most interesting for retrieval because they identify cohesive subsystems that span the architecture.
+
+### What would make me confident the signal is real
+
+- Co-change temporal stability Jaccard > 0.4
+- Cross-service co-change pairs > 10% of total
+- Import graph predicts co-change with AUC > 0.7 but not > 0.95 (complementary, not redundant)
+- Cluster-purpose embedding improvement over code-only is consistent across multiple query types
+
+### What would make me suspicious the signal is noise
+
+- Co-change weights follow a flat distribution (no heavy tail) \u2014 suggests uniform noise
+- Temporal stability Jaccard < 0.2 \u2014 co-change partners are random
+- >50% of co-change pairs are within the same module directory \u2014 just capturing file proximity
+- Synthetic co-change edges dominate the index (>40% of all edges are synthetic)
+
+---
+
+## 4. Experiment Design for Top Research Question (H4: Multi-Signal RRF Fusion)
+
+### Setup
+
+**Evaluation dataset construction:**
+Since there is no existing benchmark for multi-service Haskell/Rust retrieval, we construct one from the data itself:
+
+1. **From co-change pairs:** Take the top-200 highest-weight cross-service co-change pairs. For each pair (A, B), formulate a query: "Find code related to [cluster_purpose of A]". The ground truth is that B should appear in the results (it co-changes with A but lives in a different service).
+
+2. **From call graph:** Take 100 cross-service caller-callee pairs. Query with the caller\u2019s name/purpose. Ground truth: the callee should appear.
+
+3. **From cluster summaries:** Take 50 clusters with clear purpose descriptions. Query with a paraphrase of the purpose. Ground truth: >=3 members of that cluster should appear in results.
+
+Total: 350 query-relevance pairs with natural stratification across difficulty levels.
+
+### Baseline
+
+- **B1:** Semantic vector search only (\`stratified_vector_search()\`)
+- **B2:** BM25 only (\`bm25_search()\`)
+- **B3:** Keyword search only (\`cross_service_keyword_search()\`)
+
+### Treatment conditions
+
+- **T1:** Vector + BM25 via RRF (current \`unified_search()\`)
+- **T2:** Vector + BM25 + co-change expansion via RRF
+- **T3:** Vector + BM25 + import graph expansion via RRF
+- **T4:** Vector + BM25 + co-change + import graph via RRF (full 4-signal)
+- **T5:** T4 + cluster-purpose re-ranking (boost results whose cluster matches query cluster)
+
+### Metrics
+
+- **Recall@K** (K = 5, 10, 20): Does the ground-truth module appear in the top-K results?
+- **MRR** (Mean Reciprocal Rank): How high does the ground-truth rank?
+- **NDCG@20**: Graded relevance using co-change weight as relevance score
+- **Cross-service Recall@10**: Recall measured only on ground-truth items in a different service from the query seed (the hard case)
+
+### Minimum effect size worth publishing
+
+- Recall@10 improvement of >=8% absolute (e.g., 0.45 -> 0.53) for the multi-signal treatment over the best single-signal baseline
+- Cross-service Recall@10 improvement of >=15% absolute
+- These thresholds are based on typical improvements reported in information retrieval literature (BM25 -> neural retrieval gains are typically 5-15%)
+
+### Statistical rigor
+
+- Bootstrap confidence intervals (1000 resamples) on all metrics
+- Paired sign test between T4 and T1 per-query
+- Report effect sizes (Cohen\u2019s d), not just p-values
+
+---
+
+## 5. What Would Fail (and How to Detect It Early)
+
+### Failure mode 1: Co-change signal is noise
+
+**Symptom:** Adding co-change to RRF fusion does not improve or actually *hurts* Recall@10.
+**Early detection:** Run the temporal stability analysis (Section 3.1, item 3). If Jaccard < 0.2, the co-change signal is too noisy to help.
+**Mitigation:** Raise \`MIN_WEIGHT\` from 3 to 10. Or use co-change only for re-ranking (not retrieval expansion).
+
+### Failure mode 2: Evaluation set is circular
+
+**Symptom:** Metrics look great but the improvement doesn\u2019t generalize.
+**Root cause:** If we build the evaluation set from co-change pairs and then test whether co-change helps find those pairs, we\u2019re measuring tautology.
+**Mitigation:** Ensure the evaluation set is constructed from *held-out* co-change pairs (temporal split: train on first 80% of commits, evaluate on pairs that appear only in the last 20%). Or use an entirely independent signal (developer-written queries, issue titles) for evaluation.
+
+### Failure mode 3: Hub modules dominate
+
+**Symptom:** Import graph expansion helps, but only because it always returns \`euler-db\` type modules (which are imported by everything).
+**Early detection:** Check if the top-5 most-returned modules via graph expansion are all high-degree hubs. If so, apply degree-based damping (weight edges by 1/sqrt(degree)).
+**Mitigation:** TF-IDF-style normalization on graph expansion: penalize modules that appear in many expansions.
+
+### Failure mode 4: Embedding model is too good
+
+**Symptom:** Semantic vector search alone achieves Recall@10 > 0.85, leaving no room for complementary signals.
+**Early detection:** Run B1 first. If it\u2019s already excellent, pivot the research question to "when do graph signals help?" (characterizing the failure modes of dense retrieval).
+**Mitigation:** Focus on the *hard* subset \u2014 cross-service queries where the relevant code has no lexical overlap with the query. Graph signals should matter most there.
+
+### Failure mode 5: Haskell/Rust specificity limits generalizability
+
+**Symptom:** Reviewers reject the paper because the codebase is Haskell/Rust and results may not transfer to Python/Java.
+**Mitigation:** Frame the contribution as the *fusion framework*, not the specific results. Show ablation results that characterize *when* each signal helps, so readers can predict applicability to their own codebases.
+
+---
+
+## 6. Beyond Embeddings: Other ML Problems This Data Enables
+
+### 6.1 Change Impact Prediction
+
+**Problem:** Given a proposed code change (diff), predict which *other* modules will need to change.
+**Data:** Co-change index provides supervised labels. Import graph + call graph provide features. This is a link prediction problem on a heterogeneous graph.
+**Model:** GNN (e.g., R-GCN) on the combined import+call+co-change graph, trained to predict co-change probability for unseen module pairs.
+**Value:** Automated "you forgot to update X" warnings in code review.
+
+### 6.2 Automated Cross-Service Flow Discovery
+
+**Problem:** Automatically discover end-to-end business flows (e.g., "payment authorization flow") by combining call graph traversal with cluster summaries.
+**Data:** Call graph provides the execution paths. Cluster summaries provide business-level semantics. Co-change groups modules that participate in the same business process.
+**Method:** Community detection on a weighted graph where edge weight = alpha * call_weight + beta * cochange_weight + gamma * import_weight. Then LLM-label each community with a flow name.
+**Value:** Auto-generated architecture documentation that stays current.
+
+### 6.3 Code Review Prioritization
+
+**Problem:** Given a PR with N changed files, rank which files need the most careful review.
+**Data:** Co-change index reveals which files have historically been "error-prone partners" (high co-change weight but no import edge \u2014 implicit coupling). Call graph depth reveals criticality (functions called transitively by many entry points).
+**Method:** Combine (1) co-change anomaly score (file changed but its usual co-change partner was NOT changed), (2) call graph centrality (PageRank on the call graph), (3) blast radius size.
+**Value:** Focus reviewer attention on the riskiest parts of a PR.
+
+### 6.4 Test Selection (Predictive Test Ordering)
+
+**Problem:** Given a code change, predict which tests are most likely to fail.
+**Data:** Co-change index often links source modules to their test modules (they co-change by definition). Import graph shows test dependencies.
+**Method:** For a changed module M, rank tests by: co-change_weight(M, test) + import_distance(M, test)^{-1}.
+**Value:** Run the most relevant tests first in CI, reducing time-to-feedback.
+
+### 6.5 Semantic Code Clone Detection
+
+**Problem:** Find functionally similar code across services (potential for library extraction).
+**Data:** High cosine similarity in the 4096d embedding space + different services + no import edge = likely semantic clone.
+**Method:** Find all cross-service pairs with cosine > 0.92 and no import/call relationship. Rank by the number of such pairs per cluster.
+**Value:** Identify library extraction opportunities (reduce code duplication across services).
+
+### 6.6 Developer Expertise Modeling
+
+**Problem:** Given a code change, recommend the best reviewer.
+**Data:** Git history (already parsed for co-change) includes author information. Build an author-module affinity matrix.
+**Method:** For each file in a PR, find the authors with the highest historical commit count in co-changing modules. Weight by recency.
+**Value:** Automated reviewer suggestion that considers *implicit* expertise (author knows the modules that co-change with the changed files, not just the changed files themselves).
+
+---
+
+## 7. The Two-Paper Arc
+
+### Paper 1: "HyperFuse: Multi-Signal Retrieval Fusion for Enterprise Code Intelligence"
+
+**Venue:** ICSE 2027, FSE 2027, or ASE 2027 (software engineering)
+
+**Contribution:**
+1. A retrieval fusion framework that combines 6 heterogeneous signals (dense vectors, BM25, call graph, import graph, evolutionary coupling, cluster summaries) via RRF with graph-based expansion
+2. A novel cold-start mechanism that bootstraps co-change signal from static call graphs (\`_inject_synthetic_cochange()\`)
+3. An evaluation methodology for multi-service code retrieval using self-supervised benchmark construction
+4. Ablation study showing the marginal contribution of each signal, with particular emphasis on when graph signals help (cross-service queries) vs. when they don\u2019t (intra-module queries)
+
+**Key result (predicted):** The full 6-signal fusion achieves 15-25% higher cross-service Recall@10 than semantic search alone, with co-change and import graph contributing the most on cross-service queries.
+
+**Framing:** This is NOT "we built a tool" (that\u2019s a demo paper). This is "we show that evolutionary coupling and structural graph signals provide complementary retrieval signal to dense embeddings, and we quantify when each signal matters."
+
+### Paper 2: "GraphChange: Predicting Cross-Service Change Impact with Heterogeneous Code Graphs"
+
+**Venue:** ICML 2027, NeurIPS 2027, or KDD 2027 (ML venue)
+
+**Contribution:**
+1. A heterogeneous graph neural network for change impact prediction, trained on the combined import+call+co-change graph
+2. Node features from the 4096d Qwen3 embeddings (frozen, not fine-tuned) + structural features (degree, centrality, cluster ID)
+3. Temporal evaluation: train on commits before time T, predict co-change for commits after T
+4. Comparison with (a) embedding-only baselines, (b) graph-only baselines (GCN on import graph), (c) the full heterogeneous model
+
+**Key result (predicted):** The heterogeneous graph model outperforms both embedding-only and graph-only baselines by 10-20% on precision@10 for change impact prediction, with the strongest gains on cross-service predictions.
+
+**How they build on each other:**
+- Paper 1 establishes that the signals are complementary (ablation study) and that fusion works for retrieval
+- Paper 2 takes the same data but asks a *prediction* question (given a change, what else will change?) rather than a *retrieval* question (given a query, find relevant code)
+- Paper 1\u2019s evaluation methodology (self-supervised benchmark from co-change) becomes Paper 2\u2019s training data
+- Paper 2\u2019s GNN can become a learned fusion model that replaces Paper 1\u2019s hand-tuned RRF weights
+
+---
+
+## 8. Quick Wins: Publishable Analysis You Can Run Today
+
+### Quick Win 1: "The Complementarity of Structural and Evolutionary Coupling in Enterprise Code" (empirical study)
+
+**What to compute (no training required):**
+
+\`\`\`
+For all 111K co-change pairs:
+  1. Compute import_distance(A, B) using BFS on the import graph
+  2. Compute call_graph_connected(A, B) from the call graph
+  3. Compute same_service(A, B)
+  4. Compute same_cluster(A, B)
+
+Build a contingency table:
+  - Import-connected AND co-change: X pairs
+  - Import-connected but NOT co-change: Y pairs
+  - NOT import-connected but co-change: Z pairs  <-- THIS IS THE INTERESTING QUADRANT
+  - Neither: W pairs
+
+Report:
+  - What fraction of co-change pairs have NO import path? (implicit coupling)
+  - What fraction of import-connected pairs do NOT co-change? (stable interfaces)
+  - Correlation between co-change weight and import distance
+  - Visualization: scatter plot of (import_distance, cochange_weight) colored by same_service
+\`\`\`
+
+**Why it\u2019s publishable:** This characterization of the relationship between structural coupling (imports) and evolutionary coupling (co-change) at the *module* level in a *multi-service* codebase has not been done at this scale. Previous work (Oliva & Gerosa, 2015; Geipel & Schweitzer, 2012) studied single-repo Java projects.
+
+**Time to run:** ~30 minutes of scripting, ~5 minutes of compute.
+
+### Quick Win 2: "Cross-Service Evolutionary Coupling Patterns in Microservice Architectures"
+
+**What to compute:**
+
+\`\`\`
+For all cross-service co-change pairs (module A in service S1, module B in service S2):
+  1. Group by (S1, S2) pair
+  2. For each service pair: count pairs, mean weight, max weight
+  3. Build a service-to-service coupling heatmap (12x12 matrix)
+  4. Identify the top-20 highest-weight cross-service pairs
+  5. For each: look up their cluster_purpose \u2014 do they share a business function?
+
+Report:
+  - Which service pairs are most tightly coupled by evolutionary evidence?
+  - Does the coupling pattern match the expected architecture (order -> txns -> gateway)?
+  - Are there surprising coupling patterns (services that shouldn\u2019t be coupled but are)?
+\`\`\`
+
+**Why it\u2019s publishable:** Microservice architecture papers discuss service coupling in theory. This provides *empirical evidence* from a production codebase with 7,363 modules. The heatmap alone is a contribution \u2014 it shows where architectural assumptions break down.
+
+### Quick Win 3: Embedding Space Topology Analysis
+
+**What to compute:**
+
+\`\`\`
+Load the 94K x 4096d embeddings from vectors.lance.
+  1. Compute pairwise cosine similarity within each service (sample 1000 pairs per service)
+  2. Compute pairwise cosine similarity across services (sample 5000 cross-service pairs)
+  3. For co-change pairs: what is their cosine similarity distribution?
+  4. For non-co-change pairs: what is their cosine similarity distribution?
+  5. KS-test between the two distributions
+
+Visualize:
+  - t-SNE/UMAP of 5000 sampled nodes, colored by service
+  - Same UMAP, colored by Leiden cluster
+  - Overlay co-change edges on the UMAP \u2014 do they connect nearby points or distant ones?
+\`\`\`
+
+**Why it\u2019s publishable:** If co-change pairs have significantly higher embedding similarity than random pairs, the signals are somewhat redundant. If they have similar or *lower* similarity, the signals are complementary \u2014 this is the interesting finding. The UMAP with co-change edges overlaid would be a visually compelling figure.
+
+**Time to run:** ~1 hour (embedding loading + UMAP computation on 94K points with GPU).
+
+---
+
+## Summary: Recommended Research Priority
+
+1. **Today:** Run Quick Win 1 (complementarity analysis) \u2014 it directly informs whether the multi-signal fusion story is real
+2. **This week:** Construct the evaluation dataset (Section 4) and run the single-signal baselines
+3. **Next 2 weeks:** Implement co-change integration into \`unified_search()\` and run the full ablation
+4. **Month 1:** Write Paper 1 (HyperFuse) while the ablation results are fresh
+5. **Month 2-3:** Build the GNN for Paper 2 using the infrastructure from Paper 1
+
+The strongest publishable contribution is the **ablation study** \u2014 showing when each signal helps and when it doesn\u2019t. The ML community has many "we added X and got Y% improvement" papers. What\u2019s rare is a systematic study of *which signals are complementary vs. redundant* in code retrieval, backed by a real production codebase with 6 distinct signal types.`;
+
+panels.synthesis = `# The Room: Cross-Persona Synthesis & Debate
+
+**Date:** 2026-04-01
+**Participants:** VP Engineering (Biz), Senior PM (Prod), ML Scientist (Sci)
+
+---
+
+## Round 1: What\u2019s the actual problem we\u2019re solving?
+
+**Biz:** We keep building features but we haven\u2019t nailed the positioning. Are we a developer tool, a platform, or research infrastructure? The answer determines everything \u2014 pricing, buyer, distribution, engineering priorities.
+
+**Prod:** From daily usage, I\u2019ll tell you what we ARE: we\u2019re the only tool that can answer "what breaks if I change this?" across service boundaries. That\u2019s not a developer tool. That\u2019s an **engineering safety net**. Every other question we answer (how does X work, who calls Y) is table stakes \u2014 Copilot and Cursor will catch up. The blast radius + co-change combination is where we\u2019re truly differentiated.
+
+**Sci:** Agree on co-change being the moat. But here\u2019s the thing nobody\u2019s said yet \u2014 **we don\u2019t even use co-change in our main search path**. Look at \`unified_search()\`: it fuses vector + BM25 via RRF. Co-change is ONLY used in \`get_blast_radius()\`. That\u2019s like having a secret weapon in your vault but fighting with your fists.
+
+**Biz:** Wait \u2014 so our biggest competitive advantage isn\u2019t even wired into the core product?
+
+**Sci:** Correct. Hypothesis H4 in my memo: integrating co-change into the main RRF fusion should improve cross-service retrieval by \u22655% NDCG. That\u2019s a quick win AND a paper.
+
+---
+
+## Round 2: What should we build vs. what should we research?
+
+**Prod:** I have a clear #1: **PR Blast Radius Bot**. We already have \`pr_analyzer.py\`. It already computes blast radius. It\u2019s NOT wired into CI/CD. If we made a GitHub Action that comments on every PR with "these modules are likely affected", we\u2019d have adoption overnight. Zero ML needed. Pure engineering.
+
+**Biz:** That\u2019s the "sell to the VP" play. A dashboard showing "HyperRetrieval prevented 12 cross-service incidents this month" is how I justify the infrastructure cost. But it\u2019s not a moat \u2014 anyone can build a CI check.
+
+**Prod:** The moat is the co-change data. Nobody else has 111K weighted module pairs from git history. The CI check is the delivery vehicle; the data is the moat.
+
+**Sci:** I want to push on something bigger. The PR bot is a feature. What if the RESEARCH enabled a category of features that nobody else can build? Here\u2019s what I mean:
+
+The three things we uniquely have:
+1. **Co-change pairs** (111K, weighted) \u2014 evolutionary coupling
+2. **Leiden clusters with LLM summaries** \u2014 business-context-aware grouping
+3. **Cross-service import graph** (8,706 edges) \u2014 structural topology
+
+Nobody has all three. The research question is: **do these signals contain information that text-based systems fundamentally cannot learn?**
+
+If we prove that co-change-aware embeddings find things that text embeddings miss (like the splitPayment vs splitSettlement example), that\u2019s not just a paper \u2014 it\u2019s proof that our entire approach is structurally superior.
+
+---
+
+## Round 3: The splitPayment test
+
+**Prod:** Let me make this concrete. Engineers regularly ask about "split payment" and get results mixed with "split settlement." These are completely different flows:
+- Split payment = splitting a single payment across multiple methods (card + UPI)
+- Split settlement = splitting merchant settlement across multiple bank accounts
+
+Current search confuses them because the text is similar. But in git, \`splitPayment\` modules NEVER co-change with \`splitSettlement\` modules. The co-change graph knows they\u2019re different worlds.
+
+**Sci:** That\u2019s a perfect test case. Before any training, just measure: how many confusable pairs exist? How often does current search mix them up? This is the "Quick Win" from my memo \u2014 run it today, 30 minutes of scripting, and you have a concrete number.
+
+**Biz:** If that number is high (say 30%+ of queries return confusable results), that\u2019s a clear business case: "Our improved embeddings eliminate cross-domain confusion." If it\u2019s low, we need a different story.
+
+---
+
+## Round 4: What do we actually do in the next 4 weeks?
+
+### Week 1 \u2014 Data analysis (Scientist leads)
+
+**Sci:** Three analyses, no ML training:
+
+1. **Co-change vs import graph overlap**: What % of co-change pairs are also import-connected? If high, signals are redundant. If low (<40%), they\u2019re complementary \u2014 publishable finding alone.
+
+2. **Confusable pair census**: Find all function pairs where cosine similarity > 0.85 but co-change weight = 0. These are the cases current search gets wrong. Count them. Curate the top 20 most egregious (like splitPayment/splitSettlement).
+
+3. **Cold-start validation**: For modules with <3 commits, do synthetic co-change edges (from call graph) predict real co-change that appears later? Mask recent history and check.
+
+**Prod:** Can you also measure how often the chat app\u2019s retrieval returns results from the wrong service? I see this constantly \u2014 ask about a gateway function, get results from euler-db.
+
+**Sci:** Yes \u2014 I\u2019ll add cross-service precision to the analysis.
+
+### Week 2 \u2014 The experiment (Scientist leads, Product evaluates)
+
+**Sci:** Based on Week 1 findings, two paths:
+
+**Path A** (if confusable pairs are common): Train co-change contrastive embeddings. Use the confusable pairs as hard negatives. Measure recall improvement on held-out co-change pairs + the curated disambiguation set.
+
+**Path B** (if co-change adds signal beyond import graph): Integrate co-change into the main \`unified_search()\` RRF fusion. No embedding training needed \u2014 just add co-change as a third retrieval signal alongside vector and BM25. Measure NDCG improvement.
+
+**Prod:** I\u2019ll prepare the 50-query evaluation set for blind A/B testing. Mix of:
+- Simple lookups (should be fast, correct)
+- Cross-service flows (where co-change should help)
+- Confusable terms (where disambiguation matters)
+- Temporal questions (baseline \u2014 we expect these to fail)
+
+### Week 3 \u2014 Integration + evaluation (Product leads)
+
+**Prod:** If the experiment shows improvement:
+- Wire improved search into both Chainlit and MCP
+- Run the 50-query A/B with Juspay engineers
+- Measure: retrieval precision, answer quality (1-5 blind score), time-to-useful-answer
+
+### Week 4 \u2014 Ship or publish (Business leads)
+
+**Biz:** Two deliverables, not one:
+
+1. **Internal**: PR Blast Radius Bot as a GitHub Action. Uses existing \`pr_analyzer.py\` + improved retrieval. Ships to all 12 repos.
+
+2. **External**: Research report / paper draft with findings from the embedding experiment. Whether it\u2019s positive or negative, the analysis of co-change vs import vs semantic signal complementarity is publishable.
+
+---
+
+## Convergence: The Three Bets
+
+| Bet | Owner | Timeline | Success metric |
+|-----|-------|----------|----------------|
+| **Co-change signal analysis** (is the signal real?) | Scientist | Week 1 | Complementarity ratio, confusable pair count |
+| **Improved retrieval** (does it help?) | Scientist + Product | Week 2-3 | Recall@10 gain \u226515%, A/B win rate \u226560% |
+| **PR Blast Radius Bot** (does it ship?) | Product + Business | Week 3-4 | Deployed to \u22653 repos, \u226510 PR comments generated |
+
+---
+
+## Key Disagreements (Unresolved)
+
+**Should we train new embeddings or just add co-change to RRF?**
+- Sci: Embeddings are the publishable path. RRF addition is an engineering win but not novel.
+- Prod: I don\u2019t care about the paper \u2014 I care about search quality. If RRF integration gives 80% of the benefit at 10% of the effort, do that first.
+- Biz: Do both. RRF first (ships in days), embeddings in parallel (publishes in months).
+
+**Should we fix temporal queries (git history, ownership) or double down on structural?**
+- Prod: Temporal is the #1 gap. Engineers ask "what changed" constantly.
+- Biz: Temporal is a feature. Structural is a moat. Moat first.
+- Sci: Structural research enables temporal features later (if you understand co-change patterns, you can predict future changes).
+
+**Is 94K symbols enough for a paper, or do we need a second codebase?**
+- Sci: For an industry paper, one production codebase is fine (it\u2019s real, not synthetic). For a top venue (ICSE, FSE), we\u2019d want a second open-source codebase to show generalization.
+- Biz: We could index a large open-source project (Kubernetes, Linux kernel) as the second dataset. Build pipeline already supports multiple languages.
+
+---
+
+## Next Actions
+
+1. **Scientist**: Run the three Week 1 analyses. Write results to \`research/data/\`. No code changes.
+2. **Product**: Curate the 50-query evaluation set. Write to \`research/data/eval_queries.jsonl\`.
+3. **Business**: Draft the PR Blast Radius Bot spec. Write to \`research/reports/blast_radius_bot_spec.md\`.
+4. **All**: Reconvene after Week 1 data analysis to decide Path A vs Path B.`;
+
+panels.critical = `# CRITICAL FINDING: Co-Change Index Is Silently Broken
+
+**Date:** 2026-04-01
+**Severity:** High \u2014 the #1 competitive advantage (co-change intelligence) is non-functional
+
+## The Bug
+
+\`get_blast_radius()\` passes dot-notation module names (e.g., \`PaymentFlows\`) to \`cochange_path_traverse()\`, which looks them up in \`cochange_index\`. But \`cochange_index\` keys use \`service::filepath::Module\` format (e.g., \`euler-api-txns::euler-x::src-generated::PaymentFlows\`).
+
+**Result:** Line 594 of \`retrieval_engine.py\` \u2014 \`if m in cochange_index\` \u2014 returns \`False\` for every Haskell module. The co-change traversal silently returns empty list. Blast radius reports contain zero co-change neighbors for ~95% of queries.
+
+## Evidence
+
+\`\`\`python
+# What blast_radius passes:
+"PaymentFlows" in cochange_index  \u2192  False
+
+# What actually exists:
+"euler-api-txns::euler-x::src-generated::PaymentFlows" in cochange_index  \u2192  True
+# With rich data: co-changes with Transaction (w=54), TransactionHelper (w=42)
+\`\`\`
+
+## Impact
+
+- \`get_blast_radius()\` returns only import-graph neighbors, never co-change neighbors
+- The \`_inject_synthetic_cochange()\` function adds edges to \`cochange_index\` using \`::\` format \u2014 these work for UCS Rust modules but not for Haskell dot-notation modules
+- **Every claim about co-change intelligence in the product is effectively false for Haskell**
+- The brainstorm analysis (01_complementarity_analysis.md) reported 100% complementarity \u2014 this was actually 100% non-overlap due to naming mismatch, not a real finding
+
+## The Fix Needed
+
+Build a bidirectional mapping between the two naming conventions at \`initialize()\` time:
+
+\`\`\`
+Dot-notation:     PaymentFlows
+Co-change key:    euler-api-txns::euler-x::src-generated::PaymentFlows
+\`\`\`
+
+The graph nodes have a \`file\` attribute (e.g., \`euler-api-txns/euler-x/src-generated/PaymentFlows.hs\`). The co-change key is derived from the same file path with \`::\` separators. So the mapping is:
+
+1. For each graph node, take its \`file\` attribute
+2. Convert \`/\` to \`::\`, strip extension \u2192 get co-change key
+3. Store mapping: \`{dot_name: cochange_key}\` and \`{cochange_key: dot_name}\`
+4. Use this mapping in \`cochange_path_traverse()\` and \`_inject_synthetic_cochange()\`
+
+## What This Means for Research
+
+- The complementarity analysis needs to be re-run with proper name mapping
+- Co-change signal has NEVER been tested in production (it was broken all along)
+- Fixing this is both a bug fix AND a research contribution \u2014 we can now measure the actual value of co-change for the first time
+- The "before/after" comparison (blast radius with vs without co-change) becomes a natural experiment
+
+## Files Affected
+
+- \`serve/retrieval_engine.py\`: \`cochange_path_traverse()\`, \`_inject_synthetic_cochange()\`, \`get_blast_radius()\`
+- \`build/06_build_cochange.py\`: Should output the mapping alongside the index
+- Research analysis scripts: Need to use the mapping for valid complementarity analysis`;
+
+panels.complementarity = `# Analysis 1: Co-change vs Import Graph Complementarity
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Total unique co-change pairs (weight >= 3) | 69,009 |
+| Import-connected (1-hop) | 0 (0.0%) |
+| Import-connected (within 2-hop) | 0 (0.0%) |
+| NOT import-connected (within 2-hop) | 69,009 (100.0%) |
+| **Complementarity ratio** | **100.0%** |
+
+## Interpretation
+
+The complementarity ratio of **100.0%** means that 100.0% of evolutionary
+coupling relationships (modules that frequently change together) cannot be discovered
+through structural analysis of imports and call graphs alone.
+
+This represents the unique value that co-change analysis adds on top of static code analysis.
+
+## Complementarity by Weight Bucket
+
+| Weight | Total Pairs | Not Connected | Complementarity |
+|--------|-------------|---------------|-----------------|
+| 3 | 19,653 | 19,653 | 100.0% |
+| 4 | 12,699 | 12,699 | 100.0% |
+| 5 | 8,419 | 8,419 | 100.0% |
+| 6-10 | 17,745 | 17,745 | 100.0% |
+| 11-20 | 7,377 | 7,377 | 100.0% |
+| 21+ | 3,116 | 3,116 | 100.0% |
+
+## Methodology
+
+- Co-change pairs: all module pairs with co-change weight >= 3 from 138,117 commits
+- Import graph: built from import edges (module-to-module) and call edges (function-to-function, mapped to modules)
+- 2-hop check: module A and B are "import-connected" if there exists a path of length <= 2 in the undirected import graph
+- Services indexed: basilisk-v3, euler-api-customer, euler-api-gateway, euler-api-order, euler-api-pre-txn, euler-api-txns, euler-db, euler-drainer, graphh, haskell-sequelize, token_issuer_portal_backend`;
+
+
+
+panels.explorer = `# Explorer Findings: R&D Landscape for HyperRetrieval
+
+**Date**: 2026-03-31
+**Scope**: arxiv papers (2024-2026), GitHub repos, agent frameworks
+**Goal**: Identify breakthroughs, competitors, and opportunities for HyperRetrieval's plug-and-play code intelligence platform
+
+---
+
+## Breakthrough Papers
+
+### 1. Retrieval-Augmented Code Generation: A Survey with Focus on Repository-Level Approaches
+- **Link**: https://arxiv.org/abs/2510.04905
+- **Date**: October 2025
+- **Summary**: Comprehensive survey covering RAG-based code generation from Jan 2023 to Aug 2025. Catalogs retrieval strategies, context construction, and generation approaches for repository-scale tasks.
+- **Why it matters for HyperRetrieval**: This is THE definitive survey of our problem space. It maps the entire landscape of how retrieval signals (lexical, semantic, structural) feed into code generation. Validates our multi-signal approach.
+- **Steal/Adopt**: Their taxonomy of retrieval strategies. They found lexical-matching retrievers often miss relevant code -- confirms our BM25+vectors hybrid is the right call. Study their "context construction" phase for how to assemble retrieved chunks into effective prompts.
+
+### 2. RepoGraph: Enhancing AI Software Engineering with Repository-level Code Graph
+- **Link**: https://arxiv.org/abs/2410.14684
+- **Date**: October 2024
+- **Summary**: A plug-in module that builds repository-level code graphs and serves as navigation for AI software engineers. Boosts SWE-bench performance across multiple agent architectures.
+- **Why it matters for HyperRetrieval**: RepoGraph is architecturally closest to what we're building. It proves that a code graph layer, when plugged into existing agents, dramatically improves their performance. This validates our entire thesis.
+- **Steal/Adopt**: Their graph schema design and how they make it pluggable into different agent scaffolds (SWE-Agent, etc.). Study their extensibility model -- they tested on CrossCodeEval too.
+
+### 3. Code Graph Model (CGM): A Graph-Integrated LLM for Repository-Level SE Tasks
+- **Link**: https://arxiv.org/abs/2505.16901
+- **Date**: May 2025
+- **Summary**: Integrates repository code graphs directly into LLM attention mechanisms via a specialized adapter. Uses 7 node types and 5 edge types. Achieved 43% on SWE-bench Lite with open-source Qwen2.5-72B.
+- **Why it matters for HyperRetrieval**: Shows how to deeply integrate graph structure into LLM reasoning, not just as retrieved context but as architectural input. Their node/edge taxonomy for code graphs is well-thought-out.
+- **Steal/Adopt**: Their 7-node-type, 5-edge-type graph schema. Consider whether our graph could be serialized into a format that feeds into LLM attention, not just prompt context. Their adapter architecture for graph-to-LLM integration.
+
+### 4. GraphCoder: Repository-Level Code Completion via Code Context Graph
+- **Link**: https://arxiv.org/abs/2406.07003
+- **Date**: June 2024 (ASE 2024)
+- **Summary**: Coarse-to-fine retrieval using Code Context Graphs (CCG) that capture control-flow, data-dependence, and control-dependence between statements. Two-stage: graph-based retrieval then LLM generation.
+- **Why it matters for HyperRetrieval**: Their CCG concept maps closely to our call graph + import graph signals. The coarse-to-fine retrieval strategy (first find relevant files, then find relevant functions, then find relevant statements) is a pattern we should adopt.
+- **Steal/Adopt**: The coarse-to-fine retrieval pipeline. Their representation of control-flow and data-dependence as graph edges alongside call/import edges.
+
+### 5. cAST: Enhancing Code RAG with Structural Chunking via Abstract Syntax Tree
+- **Link**: https://arxiv.org/abs/2506.15655
+- **Date**: June 2025 (EMNLP 2025 Findings)
+- **Summary**: Proposes AST-aware chunking that recursively breaks large AST nodes into smaller chunks while preserving semantic boundaries. Boosts Recall@5 by 4.3 points on RepoEval, Pass@1 by 2.67 on SWE-bench.
+- **Why it matters for HyperRetrieval**: We already use tree-sitter for parsing. This paper shows that HOW you chunk code matters enormously for retrieval quality. Line-based chunking breaks semantic structures.
+- **Steal/Adopt**: Their recursive AST chunking algorithm. The open-source implementation at https://github.com/yilinjz/astchunk uses tree-sitter, same as us. Direct integration opportunity.
+
+### 6. Knowledge Graph Based Repository-Level Code Generation
+- **Link**: https://arxiv.org/abs/2505.14394
+- **Date**: May 2025
+- **Summary**: Builds knowledge graphs from code repositories to improve code generation, evaluated on EvoCodeBench. Outperforms baseline approaches significantly.
+- **Why it matters for HyperRetrieval**: Validates code knowledge graphs as a retrieval layer. Their evaluation on EvoCodeBench (evolutionary code benchmark) is relevant to our co-change signal.
+- **Steal/Adopt**: Their knowledge graph construction pipeline and how they map code entities to KG triples.
+
+### 7. GraphRAG: Retrieval-Augmented Generation with Graphs (Survey)
+- **Link**: https://arxiv.org/abs/2501.00309
+- **Date**: January 2025
+- **Summary**: Comprehensive survey of graph-enhanced RAG. Covers graph-structured knowledge representation, graph-based retrieval, and structure-aware integration. Microsoft's GraphRAG showed 15% improvement over vanilla vector retrieval on legacy code migration tasks.
+- **Why it matters for HyperRetrieval**: We already have graph signals. This survey maps the design space for how to combine them with vector retrieval. The "Practical GraphRAG" paper specifically tested on legacy code migration -- an enterprise use case we should target.
+- **Steal/Adopt**: Their framework for combining graph traversal with vector similarity. The community detection approach for generating "community summaries" at different granularities (we already use Leiden -- this shows how to use those clusters for retrieval).
+
+### 8. Codebase-Memory: Tree-Sitter-Based Knowledge Graphs for LLM Code Exploration via MCP
+- **Link**: https://arxiv.org/html/2603.27277v1
+- **Date**: March 2026
+- **Summary**: Parses codebases using Tree-Sitter across 66 languages, stores graph in SQLite, exposes 14 structural query tools via MCP. Features multi-phase build pipeline, 6-strategy call resolution, and Louvain community detection.
+- **Why it matters for HyperRetrieval**: THIS IS EXTREMELY CLOSE TO WHAT WE'RE BUILDING. Same tech stack (tree-sitter, SQLite, MCP), similar pipeline (multi-phase build), similar signals (call graph, community detection). We need to study this carefully.
+- **Steal/Adopt**: Their 14 MCP tool definitions, their 6-strategy call resolution approach, their SQLite schema design. Compare their Louvain clustering with our Leiden clustering.
+
+### 9. Enhancing Change Impact Prediction by Integrating Evolutionary Coupling with Software Change Relationships
+- **Link**: https://dl.acm.org/doi/10.1145/3674805.3686668
+- **Date**: 2024 (ESEM 2024)
+- **Summary**: Integrates evolutionary coupling (co-change patterns) with software change relationships for change impact prediction. Fine-grained co-change relationship analysis from evolution history mining.
+- **Why it matters for HyperRetrieval**: Directly validates our co-change signal. Shows how evolutionary coupling can predict blast radius -- exactly what our blast radius agent needs.
+- **Steal/Adopt**: Their method for combining structural relationships (call graph) with evolutionary coupling (co-change) for impact prediction. This is the theoretical foundation for our blast radius agent.
+
+### 10. Comprehensive Empirical Evaluation of Agent Frameworks on Code-centric SE Tasks
+- **Link**: https://arxiv.org/html/2511.00872v1
+- **Date**: November 2025
+- **Summary**: Systematic evaluation of 7 agent frameworks across software development, vulnerability detection, and program repair tasks.
+- **Why it matters for HyperRetrieval**: Provides empirical data on which agent patterns work best for different code tasks. Critical for designing our agent framework.
+- **Steal/Adopt**: Their evaluation methodology and the framework characteristics that correlated with success on different task types.
+
+### 11. Agentic AI Frameworks: Architectures, Protocols, and Design Challenges
+- **Link**: https://arxiv.org/html/2508.10146v1
+- **Date**: August 2025
+- **Summary**: Surveys agentic AI frameworks, identifies limitations in generalizability and composability, recommends standardized benchmarks and universal agent communication protocols.
+- **Why it matters for HyperRetrieval**: Frames the design space for our agent framework. MCP is called out as the key interoperability protocol.
+- **Steal/Adopt**: Their taxonomy of agent communication patterns and composability strategies.
+
+### 12. LocAgent: Graph-guided Agentic Framework for Code Localization
+- **Link**: https://arxiv.org/abs/2503.09089 | GitHub: https://github.com/gersteinlab/LocAgent
+- **Date**: March 2025 (ACL 2025)
+- **Summary**: Graph-guided LLM agent that precisely localizes where in a codebase changes need to be made, using code graph structure to navigate.
+- **Why it matters for HyperRetrieval**: Code localization is a core retrieval problem. Their graph-guided navigation approach could improve our code search agent.
+- **Steal/Adopt**: Their graph traversal strategy for narrowing down from repo-level to exact location.
+
+---
+
+## Repos Worth Studying
+
+### 1. Sourcegraph Cody
+- **URL**: https://github.com/sourcegraph/cody-vs (VS extension) / https://sourcegraph.com
+- **Stars**: Open core, enterprise product
+- **Summary**: Multi-layered RAG architecture combining search API, code graph (SCIP), embeddings, and MCP. Three context layers: local file, local repo, remote repo. Recently unified search + chat + agents.
+- **Architectural insight**: Their SCIP-based code graph reduces hallucinations (type errors, imaginary functions). The multi-layered context system (local file -> local repo -> remote repo) is a pattern we should adopt.
+- **What they do better**: Production-grade code graph (SCIP), enterprise-scale indexing, and their OpenCtx protocol for pulling context from external tools (Jira, Linear, Notion).
+
+### 2. OpenHands (formerly OpenDevin)
+- **URL**: https://github.com/All-Hands-AI/OpenHands
+- **Stars**: ~45k+
+- **Summary**: Open platform for AI software developers. Sandboxed execution, multi-agent coordination, evaluation benchmarks. Supports custom agent implementations.
+- **Architectural insight**: Their sandboxed execution model is critical for safety. AgentSkills library provides file editing utilities. The platform approach (implement any agent on top) is similar to our vision.
+- **What they do better**: Sandboxed execution environment, established benchmark performance (SWE-bench), and the agent abstraction layer.
+
+### 3. SWE-agent
+- **URL**: https://github.com/SWE-agent/SWE-agent
+- **Stars**: ~15k+
+- **Summary**: Princeton NLP's agent for automatically fixing GitHub issues. NeurIPS 2024 paper. Also has mini-swe-agent (100-line version scoring >74% on SWE-bench verified).
+- **Architectural insight**: The Agent-Computer Interface (ACI) design -- custom tools for the agent to interact with code. Their mini-agent proves that a small, well-designed tool set can outperform complex systems.
+- **What they do better**: Purpose-built code editing tools (search, edit, navigation) that form a clean ACI. The 100-line mini-agent is a masterclass in minimal viable agent design.
+
+### 4. Moatless Tools
+- **URL**: https://github.com/aorwall/moatless-tools
+- **Stars**: ~2k+
+- **Summary**: LLM-based code editing in large codebases. Includes CodeIndex, SearchTree, and actions like FindClass, FindFunction, SemanticSearch. Claude 4 Sonnet achieves 70.8% on SWE-bench.
+- **Architectural insight**: Their CodeIndex and action-based architecture (FindClass, FindFunction, FindCodeSnippet, SemanticSearch, ViewCode) is a clean decomposition of code intelligence operations.
+- **What they do better**: The action/tool decomposition is very clean. Their tree search approach (moatless-tree-search) for exploring solution spaces is novel.
+
+### 5. Aider
+- **URL**: https://github.com/paul-gauthier/aider
+- **Stars**: ~30k+
+- **Summary**: Terminal-based AI coding assistant. Works with any LLM. pip install and go. Direct file editing on local machine.
+- **Architectural insight**: Extreme simplicity -- no frontend, no sandbox, just terminal + LLM + file system. The "repo map" feature automatically identifies relevant files using tree-sitter and ctags.
+- **What they do better**: Zero-friction setup (pip install, add API key, start coding). Their repo map is a lightweight code intelligence layer we should study.
+
+### 6. Continue.dev
+- **URL**: https://github.com/continuedev/continue
+- **Stars**: ~25k+
+- **Summary**: Open-source AI coding assistant for VS Code/JetBrains. Three modes: Chat, Plan, Agent. Self-hosted capable. Model-agnostic. CI/CD integration with AI code review checks.
+- **Architectural insight**: The .continue/rules/ directory for team standards is a great pattern. Their embedding + reranking model pipeline for context. The CI/CD integration (AI checks on every PR) is what our PR review agent should target.
+- **What they do better**: IDE integration, model flexibility (any provider), the rules system for team conventions, and the CI/CD pipeline for automated code review.
+
+### 7. RAGFlow
+- **URL**: https://github.com/infiniflow/ragflow
+- **Stars**: ~70k
+- **Summary**: Leading open-source RAG engine with Agent capabilities. Production-ready for enterprise chatbots, assistants, and data analysis.
+- **Architectural insight**: Their "deep document understanding" approach -- not just chunking text but understanding document structure. The workflow builder for defining RAG pipelines.
+- **What they do better**: Production hardening, enterprise features, and the visual workflow builder for RAG pipeline design.
+
+### 8. Dify
+- **URL**: https://github.com/langgenius/dify
+- **Stars**: ~114k
+- **Summary**: Open-source LLM app development platform with workflow builder, RAG pipelines, and agent capabilities. Visual tool for building AI applications.
+- **Architectural insight**: Their workflow builder abstraction -- define tool-using agents and RAG pipelines with minimal code. The monitoring/usage tracking is enterprise-grade.
+- **What they do better**: Visual workflow builder, production monitoring, and the sheer breadth of integrations.
+
+### 9. Agentic Code Indexer
+- **URL**: https://github.com/teabranch/agentic-code-indexer
+- **Stars**: Small/new
+- **Summary**: Code analysis and graph-based indexing using Neo4j, LLMs, and semantic embeddings. Multi-language support (Python, C#, JS/TS). Hybrid search combining vector similarity, entity lookup, and graph context expansion.
+- **Architectural insight**: Their hybrid search system (vector + entity + graph expansion) is exactly our multi-signal approach. Neo4j for graph storage is heavier than our SQLite approach but more queryable.
+- **What they do better**: Neo4j gives richer graph queries. Their graph context expansion (start from a node, expand outward) is a retrieval strategy we should adopt.
+
+### 10. Code-Index-MCP
+- **URL**: https://github.com/johnhuang316/code-index-mcp
+- **Stars**: Small/new
+- **Summary**: MCP server for code indexing and search. Uses tree-sitter for 7 core languages with fallback for 50+ file types. Designed for LLM integration.
+- **Architectural insight**: Clean MCP-first design. The fallback strategy (specialized tree-sitter -> generic parsing) is pragmatic.
+- **What they do better**: MCP-native design from day one. Simple, focused scope.
+
+### 11. CodeRLM
+- **URL**: https://github.com/JaredStewart/coderlm
+- **Stars**: Small/new
+- **Summary**: Tree-sitter-powered code indexing server. Builds symbol table with cross-references. Agents can search symbols, list functions, find callers, grep patterns.
+- **Architectural insight**: The "targeted queries instead of loading everything into context" philosophy. Agents explore codebases through specific structural queries rather than bulk retrieval.
+- **What they do better**: The query-driven exploration model -- agents ask specific structural questions rather than getting a dump of context.
+
+### 12. Open Aware (by Qodo)
+- **URL**: https://github.com/qodo-ai/open-aware
+- **Stars**: New
+- **Summary**: Code intelligence via MCP. Semantic understanding across multiple repositories with daily updated indexes. Goes beyond keyword search.
+- **Architectural insight**: Multi-repo support with daily index updates. The MCP-first approach for serving code intelligence to any AI assistant.
+- **What they do better**: Multi-repo support and the daily index refresh pipeline.
+
+---
+
+## Agent Frameworks Comparison
+
+| Feature | **LangGraph** | **CrewAI** | **AutoGen (AG2)** | **DSPy** | **OpenHands** | **Claude Agent SDK** | **mcp-agent** |
+|---|---|---|---|---|---|---|---|
+| **Core paradigm** | Graph-based stateful workflows | Role-based agent teams | Conversational multi-agent | Programmatic prompt optimization | Platform for AI developers | Anthropic-native agents | MCP-native workflows |
+| **MCP support** | Yes (via langchain-mcp-adapters) | Limited | Via Microsoft Agent Framework | No native | No native | First-class | First-class |
+| **State management** | Excellent (graph state) | Basic | Conversation-based | Declarative | Sandboxed environment | Session-based | Temporal-backed |
+| **Multi-agent** | Yes (supervisor, swarm patterns) | Yes (crew with roles) | Yes (group chat, debate) | No (single pipeline) | Yes (agent coordination) | Yes | Yes (composable) |
+| **Code-specific** | No (general purpose) | No (general purpose) | No (general purpose) | No (general purpose) | Yes (code-focused) | No (general purpose) | No (general purpose) |
+| **Production readiness** | High | Medium | Medium-High | Medium | High | High | Medium |
+| **Community size** | Very large (LangChain ecosystem) | Large | Large (Microsoft-backed) | Medium (Stanford) | Large | Growing | Small |
+| **Self-hosted** | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| **Best for HyperRetrieval** | Agent orchestration layer | Quick prototyping | Conversational agents | Prompt optimization | Agent execution model | MCP integration | MCP workflow patterns |
+
+### Recommendation for HyperRetrieval
+
+**Primary choice: LangGraph** for agent orchestration, because:
+1. Graph-based workflows match our graph-centric architecture
+2. Strong MCP support via langchain-mcp-adapters
+3. Stateful workflows are critical for multi-step code analysis
+4. Largest ecosystem and community
+5. Production-grade with persistence and resumability
+
+**Secondary: Claude Agent SDK** for MCP-native agents, because:
+1. First-class MCP support (Anthropic created MCP)
+2. Zero-trust security model fits enterprise requirements
+3. Best integration with Claude models
+
+**For prompt optimization: DSPy**, because:
+1. Can automatically optimize our retrieval-to-generation prompts
+2. Replaces manual prompt engineering with learned optimization
+3. Could improve our ranking/reranking pipeline
+
+**NOT recommended**: CrewAI (too high-level for our needs), AutoGen (conversational paradigm doesn't fit code analysis well).
+
+---
+
+## Competitive Landscape Summary
+
+### Direct Competitors (doing similar things)
+| Product | Approach | Our Advantage |
+|---|---|---|
+| **Sourcegraph Cody** | SCIP code graph + embeddings + MCP | We're open-source, self-hosted first. They're enterprise SaaS. We have co-change signal they don't. |
+| **Codebase-Memory** | Tree-sitter + SQLite + MCP + Louvain | Very similar stack. We have more signals (6 vs their ~4). We have Leiden (better than Louvain). |
+| **Agentic Code Indexer** | Neo4j + embeddings + LLM summaries | We're lighter (SQLite vs Neo4j). They have richer graph queries. |
+| **GitHub Copilot** | Proprietary indexing + semantic search | We're open-source, self-hosted, air-gapped capable. They're cloud-only. |
+
+### Indirect Competitors (adjacent space)
+| Product | Approach | Relationship |
+|---|---|---|
+| **OpenHands** | Agent platform for code | Potential integration target -- our retrieval feeds their agents |
+| **SWE-agent** | Agent for issue fixing | Potential integration target -- RepoGraph proved code graphs boost SWE-agent |
+| **Moatless Tools** | Code editing with search | Their CodeIndex is simpler than ours; we could be their retrieval backend |
+| **Continue.dev** | IDE AI assistant | Potential integration -- we provide the code intelligence, they provide the IDE UX |
+
+---
+
+## The Big Opportunities
+
+Based on comprehensive analysis of 20+ papers, 15+ repos, and 7+ frameworks, here are the three things HyperRetrieval should build next:
+
+### 1. GraphRAG-Enhanced Retrieval Pipeline (Highest Impact)
+
+**What**: Upgrade our 6-signal retrieval to use GraphRAG patterns -- specifically, use Leiden clusters to generate hierarchical community summaries, then use these summaries as an additional retrieval layer.
+
+**Why**: Microsoft's GraphRAG showed 15% improvement over vanilla vector retrieval. We ALREADY have the Leiden clusters. We just need to:
+- Generate natural language summaries for each cluster ("This module handles authentication and session management")
+- Create a hierarchical index: cluster summaries -> file summaries -> function summaries
+- Use this hierarchy for coarse-to-fine retrieval (like GraphCoder's approach)
+
+**Evidence**: Papers #7 (GraphRAG survey), #4 (GraphCoder coarse-to-fine), #6 (KG-based code gen), and the Codebase-Memory system all converge on this pattern.
+
+**Effort**: Medium. We have the clusters. We need summary generation + hierarchical retrieval logic.
+
+### 2. Plug-and-Play Agent Framework with MCP Tool Registry (Biggest Moat)
+
+**What**: Build a composable agent framework where:
+- Each agent is defined as a configuration (role, tools, retrieval signals, output format)
+- All agents access code intelligence through our MCP tools
+- Users can create custom agents by composing existing tools
+- Ship 4 default agents: Code Search, Blast Radius, PR Review, Onboarding Guide
+
+**Why**: No one has a plug-and-play agent framework specifically for code intelligence. OpenHands is general-purpose. SWE-agent is single-purpose. We can be the "agent framework for code understanding" where the retrieval layer is already solved.
+
+**Architecture**: Use LangGraph for orchestration + our MCP server for tools. Each agent is a LangGraph workflow that uses MCP tools. The framework handles:
+- Agent definition (YAML/JSON config)
+- Tool composition (which MCP tools each agent can use)
+- Signal selection (which of our 6 signals to activate per query)
+- Output formatting (structured results for different consumers)
+
+**Evidence**: Papers #10 (agent framework evaluation), #11 (agent architecture survey), the mcp-agent pattern, and the gap analysis showing no code-specific composable agent framework exists.
+
+**Effort**: High. But this is our core differentiator.
+
+### 3. AST-Aware Chunking + Adaptive Signal Weighting (Retrieval Quality)
+
+**What**: Two improvements to retrieval quality:
+1. Replace line-based chunking with cAST-style AST-aware chunking (paper #5). Use tree-sitter to create semantically coherent chunks.
+2. Implement adaptive signal weighting -- learn which of our 6 signals matter most for different query types (semantic search queries weight vectors higher, "what breaks if I change X" queries weight co-change + call graph higher).
+
+**Why**: cAST showed +4.3 Recall@5 improvement just from better chunking. And right now our signal fusion is likely static/equal-weighted. Different queries need different signal mixes.
+
+**How**:
+- Chunking: Integrate https://github.com/yilinjz/astchunk or implement the recursive AST chunking algorithm. We already use tree-sitter.
+- Signal weighting: Start with heuristic rules (query classification -> signal weights), evolve to learned weights using DSPy-style optimization.
+
+**Evidence**: Paper #5 (cAST), paper #1 (survey noting lexical retrievers miss code), DSPy framework for prompt/pipeline optimization.
+
+**Effort**: Medium. AST chunking is a focused change. Signal weighting is an ongoing optimization.
+
+---
+
+## Bonus: Quick Wins We Can Implement This Week
+
+1. **Study Codebase-Memory's 14 MCP tools** (https://arxiv.org/html/2603.27277v1) -- compare with our MCP tool set, identify gaps
+2. **Add coarse-to-fine retrieval** -- first retrieve relevant clusters, then files within those clusters, then functions
+3. **Benchmark against RepoGraph** -- plug our retrieval into SWE-agent and measure SWE-bench performance
+4. **Add the cAST chunking library** as an optional chunking strategy alongside our current approach
+
+---
+
+## Key Sources and References
+
+### Papers
+- [RACG Survey](https://arxiv.org/abs/2510.04905) - Comprehensive RAG for code survey
+- [RepoGraph](https://arxiv.org/abs/2410.14684) - Repository-level code graph
+- [Code Graph Model](https://arxiv.org/abs/2505.16901) - Graph-integrated LLM
+- [GraphCoder](https://arxiv.org/abs/2406.07003) - Code context graph retrieval
+- [cAST](https://arxiv.org/abs/2506.15655) - AST-aware chunking
+- [KG Code Gen](https://arxiv.org/abs/2505.14394) - Knowledge graph for code
+- [GraphRAG Survey](https://arxiv.org/abs/2501.00309) - Graph-enhanced RAG
+- [Codebase-Memory](https://arxiv.org/html/2603.27277v1) - Tree-sitter + MCP knowledge graph
+- [Change Impact Prediction](https://dl.acm.org/doi/10.1145/3674805.3686668) - Evolutionary coupling
+- [Agent Framework Evaluation](https://arxiv.org/html/2511.00872v1) - Code-centric agent comparison
+- [Agentic AI Frameworks](https://arxiv.org/html/2508.10146v1) - Architecture survey
+- [LocAgent](https://arxiv.org/abs/2503.09089) - Graph-guided code localization
+- [DeepCode](https://arxiv.org/abs/2512.07921) - Open agentic coding
+- [AgentCoder](https://arxiv.org/abs/2312.13010) - Multi-agent code generation
+- [Practical GraphRAG](https://arxiv.org/abs/2507.03226) - Enterprise GraphRAG at scale
+- [CodeRAG on Bigraph](https://arxiv.org/html/2504.10046v1) - Bigraph-based code retrieval
+- [GVE-Leiden](https://arxiv.org/abs/2312.13936) - Fast parallel Leiden algorithm
+- [Dynamic Leiden](https://arxiv.org/abs/2405.11658) - Dynamic community detection
+
+### Repos
+- [Sourcegraph Cody](https://sourcegraph.com) - Enterprise code intelligence
+- [OpenHands](https://github.com/All-Hands-AI/OpenHands) - AI developer platform
+- [SWE-agent](https://github.com/SWE-agent/SWE-agent) - GitHub issue solver
+- [Moatless Tools](https://github.com/aorwall/moatless-tools) - Code editing agent
+- [Aider](https://github.com/paul-gauthier/aider) - Terminal AI coding
+- [Continue.dev](https://github.com/continuedev/continue) - Open-source IDE assistant
+- [RAGFlow](https://github.com/infiniflow/ragflow) - RAG engine
+- [Dify](https://github.com/langgenius/dify) - LLM app platform
+- [Agentic Code Indexer](https://github.com/teabranch/agentic-code-indexer) - Neo4j code graphs
+- [Code-Index-MCP](https://github.com/johnhuang316/code-index-mcp) - MCP code indexer
+- [CodeRLM](https://github.com/JaredStewart/coderlm) - Tree-sitter symbol server
+- [Open Aware](https://github.com/qodo-ai/open-aware) - MCP code intelligence
+- [LocAgent](https://github.com/gersteinlab/LocAgent) - Graph-guided localization
+- [ASTChunk](https://github.com/yilinjz/astchunk) - AST-aware code chunking
+- [LangGraph MCP Adapters](https://github.com/langchain-ai/langchain-mcp-adapters) - LangGraph + MCP
+- [mcp-agent](https://github.com/lastmile-ai/mcp-agent) - MCP-native agent framework
+- [MCP Servers](https://github.com/modelcontextprotocol/servers) - Official MCP servers
+- [Awesome-GraphRAG](https://github.com/DEEP-PolyU/Awesome-GraphRAG) - GraphRAG resource list
+- [Awesome Repo-Level Code Gen](https://github.com/YerbaPage/Awesome-Repo-Level-Code-Generation) - Paper list
+
+### Framework Comparisons
+- [12 MCP Agent Frameworks Compared](https://clickhouse.com/blog/how-to-build-ai-agents-mcp-12-frameworks)
+- [CrewAI vs LangGraph vs AutoGen vs OpenAgents](https://openagents.org/blog/posts/2026-02-23-open-source-ai-agent-frameworks-compared)
+- [LangGraph vs AutoGen vs CrewAI Architecture Analysis](https://latenode.com/blog/platform-comparisons-alternatives/automation-platform-comparisons/langgraph-vs-autogen-vs-crewai-complete-ai-agent-framework-comparison-architecture-analysis-2025)
+- [Best AI Agent Frameworks 2025](https://langwatch.ai/blog/best-ai-agent-frameworks-in-2025-comparing-langgraph-dspy-crewai-agno-and-more)
+- [Air-Gapped AI Code Assistants](https://intuitionlabs.ai/articles/enterprise-ai-code-assistants-air-gapped-environments)
+
+---
+
+## Update: 2026-04-01 01:17
+
+### New Papers
+
+#### 13. InlineCoder: Repository-Level Code Generation via Context Inlining
+- **Link**: https://arxiv.org/abs/2601.00376
+- **Date**: January 2026
+- **Summary**: Reframes repo-level code generation by inlining the target function into its call graph. Bidirectional inlining: upstream (inline into callers for usage context) and downstream (inline callees for dependency context).
+- **Why it matters for HyperRetrieval**: Their call-graph-driven context assembly is directly applicable to our retrieval pipeline. We could inline the target symbol into its call graph context -- exactly what our trace_callers/trace_callees tools provide.
+- **Steal/Adopt**: The bidirectional inlining strategy. We already have call graph data; experiment with inlining-based context assembly.
+
+#### 14. FeatureBench: Benchmarking Agentic Coding for Complex Feature Development
+- **Link**: https://arxiv.org/abs/2602.10975
+- **Date**: February 2026
+- **Summary**: 200 tasks from 24 repos for evaluating end-to-end feature development. Claude 4.5 Opus (74.4% on SWE-bench) solves only 11.0% of FeatureBench, exposing a massive gap between bug-fix and feature-development capabilities.
+- **Why it matters for HyperRetrieval**: Feature development requires understanding architectural patterns. Our multi-signal retrieval (cluster summaries + co-change) could help agents understand where new features should be placed.
+- **Steal/Adopt**: Use FeatureBench as an evaluation target for our retrieval layer.
+
+#### 15. Bridging Protocol and Production: MCP Design Patterns
+- **Link**: https://arxiv.org/abs/2603.13417
+- **Date**: March 2026
+- **Summary**: Identifies three missing MCP primitives for production: identity propagation (CABP), adaptive tool budgeting (ATBA), and structured error recovery (SERF). Based on enterprise deployment lessons.
+- **Why it matters for HyperRetrieval**: Tells us exactly what breaks when MCP tools go to production -- timeout cascades, identity context loss, and unstructured errors. Production readiness checklist is directly actionable.
+- **Steal/Adopt**: Implement ATBA and SERF for our MCP server. Review their 5-dimension failure taxonomy.
+
+#### 16. RepoRepair: Hierarchical Code Documentation for Program Repair
+- **Link**: https://arxiv.org/abs/2603.01048
+- **Date**: March 2026
+- **Summary**: Generates hierarchical documentation (function -> file level) as semantic abstractions for repo-level fault localization. Achieves 45.7% on SWE-bench Lite.
+- **Why it matters for HyperRetrieval**: Validates our cluster summary approach. We should extend to file-level and function-level summaries too.
+
+#### 17. MCP Tool Descriptions Are Smelly!
+- **Link**: https://arxiv.org/abs/2602.14878
+- **Date**: February 2026
+- **Summary**: Empirical study of 856 tools across 103 MCP servers. Poor tool descriptions significantly degrade agent performance. Proposes augmented descriptions.
+- **Why it matters for HyperRetrieval**: Our 8 MCP tools' descriptions directly affect how well LLMs use them. Audit against their smell taxonomy.
+
+#### 18. Self-Organizing Multi-Agent Systems for Continuous Software Development
+- **Link**: https://arxiv.org/abs/2603.25928
+- **Date**: March 2026
+- **Summary**: Orchestrator-driven multi-agent system where agents operate autonomously through development phases. Orchestrator provides scheduling without making SE decisions.
+- **Why it matters for HyperRetrieval**: Validates our planned composable agent framework architecture.
+
+#### 19. From Laboratory to Real-World: Benchmarking Agentic Code Reasoning
+- **Link**: https://arxiv.org/abs/2601.03731
+- **Date**: January 2026
+- **Summary**: Evaluates agents on maintaining logical consistency across massive real-world codebases. Focuses on lab-to-production gap.
+- **Why it matters for HyperRetrieval**: Better retrieval (our value proposition) closes this gap.
+
+### New Repos
+
+#### 13. Understand-Anything
+- **URL**: https://github.com/Lum1104/Understand-Anything
+- **Summary**: Claude Code plugin with 5-agent pipeline building knowledge graphs. Interactive web dashboard. Works across Claude Code, Cursor, Gemini CLI.
+- **Why it matters**: Direct competitor as a Claude Code plugin with KG + visualization.
+
+#### 14. GitNexus
+- **URL**: https://github.com/abhigyanpatwari/GitNexus
+- **Summary**: Client-side knowledge graph creator running entirely in browser with built-in Graph RAG agent. Zero-server architecture.
+
+#### 15. code-review-graph
+- **URL**: https://github.com/tirth8205/code-review-graph
+- **Summary**: Local knowledge graph for Claude Code. Claims 6.8x fewer tokens on reviews, 49x fewer on daily coding.
+
+#### 16. ReSharper MCP Server
+- **URL**: https://github.com/joshua-light/resharper-mcp
+- **Summary**: MCP server in Rider IDE exposing semantic code intelligence (definitions, references, type hierarchy) to AI agents.
+
+### Industry News
+
+- **Sourcegraph spins out Amp** as independent company (coding agent). Validates code intelligence and agent execution as distinct products.
+- **Cursor Composer 2** (March 2026): Own coding model at $0.50/$2.50 per M tokens, event-triggered automations, self-hosted cloud agents, JetBrains via ACP. $2B ARR.
+- **GitHub Copilot Agentic Code Review** (March 5, 2026): Agentic tool-calling gathers full repo context before reviewing. Auto-generates fix PRs. 60M+ reviews.
+- **Claude Code MCP Tool Search** (Jan 2026): 85% token reduction via lazy tool loading. MCP Elicitation enables mid-task structured input from servers.
+- **OpenHands CLI** (2026): pip-installable, no Docker, model-agnostic, accuracy similar to Claude Code. 65k+ stars.
+- **mini-swe-agent supersedes SWE-agent** (March 2026): Simpler, >74% SWE-bench verified, tool calls by default.
+
+### Key Takeaways
+
+1. **MCP Tool Quality is Critical**: Audit and improve our 8 tool descriptions (paper #17).
+2. **Call-Graph Context Assembly**: InlineCoder shows inlining beats flat RAG (paper #13).
+3. **FeatureBench as Eval Target**: Massive gap in feature development (paper #14).
+4. **Event-Triggered Agents**: Cursor + Copilot both ship CI/CD-integrated agents.
+5. **Token Efficiency Metrics**: Measure and publicize savings from our MCP tools.
+`;
+// ============================================================
+// Markdown rendering setup
+// ============================================================
+marked.setOptions({
+  highlight: function(code, lang) {
+    if (lang && hljs.getLanguage(lang)) {
+      return hljs.highlight(code, { language: lang }).value;
+    }
+    return hljs.highlightAuto(code).value;
+  },
+  breaks: false,
+  gfm: true
+});
+
+// ============================================================
+// Panel switching logic
+// ============================================================
+let currentPanel = 'business';
+
+function switchPanel(id) {
+  currentPanel = id;
+  // Update sidebar active state
+  document.querySelectorAll('.sidebar-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.panel === id);
+  });
+  // Render content
+  const container = document.getElementById('docContainer');
+  container.innerHTML = marked.parse(panels[id] || '# Not found');
+  // Scroll to top
+  document.querySelector('.content').scrollTop = 0;
+  // Re-highlight code blocks
+  document.querySelectorAll('pre code').forEach(block => {
+    hljs.highlightElement(block);
+  });
+  // Show/hide alert banner (only on non-critical pages)
+  const banner = document.getElementById('alertBanner');
+  if (id === 'critical') {
+    banner.style.display = 'none';
+  } else {
+    banner.style.display = 'flex';
+  }
+}
+
+// Sidebar click handlers
+document.querySelectorAll('.sidebar-item').forEach(el => {
+  el.addEventListener('click', () => switchPanel(el.dataset.panel));
+});
+
+// Initial render
+switchPanel('business');
+</script>
+</body>
+</html>
