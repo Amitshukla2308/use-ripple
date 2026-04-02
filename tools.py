@@ -406,6 +406,71 @@ AGENT_TOOLS = [
         }, "required": ["token", "part"]}
     }},
 
+    # ── Guardian / PR analysis tools ─────────────────────────────────────────
+    {"type": "function", "function": {
+        "name": "predict_missing_changes",
+        "description": (
+            "Given a list of changed files or modules, predict what else should change.\n\n"
+            "Uses co-change history + Granger causality to find files that historically change "
+            "together with the given files but are missing from the changeset.\n\n"
+            "Use this for PR review: 'I changed X and Y — am I missing anything?'"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "changed_files": {
+                "type": "array", "items": {"type": "string"},
+                "description": "List of changed file paths or module names."
+            },
+            "min_confidence": {
+                "type": "number",
+                "description": "Minimum confidence threshold 0-1 (default 0.1)."
+            }
+        }, "required": ["changed_files"]}
+    }},
+    {"type": "function", "function": {
+        "name": "check_my_changes",
+        "description": (
+            "SDLC Guardian: comprehensive PR review combining blast radius + missing changes "
+            "+ risk score + suggested reviewers in one call.\n\n"
+            "Returns a PASS/WARN/FAIL verdict with actionable details.\n\n"
+            "Use this when reviewing a PR or before submitting changes."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "changed_files": {
+                "type": "array", "items": {"type": "string"},
+                "description": "List of changed file paths or module names."
+            }
+        }, "required": ["changed_files"]}
+    }},
+    {"type": "function", "function": {
+        "name": "suggest_reviewers",
+        "description": (
+            "Suggest PR reviewers based on module ownership from git history.\n\n"
+            "Returns ranked reviewers who have the most context on the affected modules, "
+            "including modules in the blast radius — not just the directly changed files."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "changed_files": {
+                "type": "array", "items": {"type": "string"},
+                "description": "List of changed file paths or module names."
+            }
+        }, "required": ["changed_files"]}
+    }},
+    {"type": "function", "function": {
+        "name": "score_change_risk",
+        "description": (
+            "Compute a composite risk score (0-100) for a set of changes.\n\n"
+            "Components: blast radius scope, coverage gap (missing co-changes), "
+            "reviewer concentration (bus factor), service spread.\n\n"
+            "Returns: score, level (LOW/MEDIUM/HIGH/CRITICAL), breakdown per component."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "changed_files": {
+                "type": "array", "items": {"type": "string"},
+                "description": "List of changed file paths or module names."
+            }
+        }, "required": ["changed_files"]}
+    }},
+
     # ── HyperCode coding tools ────────────────────────────────────────────────
     # Enabled when apps/cli/tools/ is importable (_CODING_TOOLS_AVAILABLE = True).
     # These allow the Chainlit chat + MCP server to read/write/edit files and run
@@ -971,6 +1036,77 @@ def tool_get_context_continue(token: str, part: int) -> str:
 # TOOL DISPATCH
 # ════════════════════════════════════════════════════════════════════════════
 
+def _tool_guardian(mode: str, changed_files: list, min_confidence: float = 0.1) -> str:
+    """Unified guardian tool handler — resolves files to modules, then dispatches."""
+    import json as _json
+    resolved = RE.resolve_files_to_modules(changed_files)
+    seed_mods = []
+    for fp, mods in resolved.items():
+        seed_mods.extend(mods if mods else [fp])
+    if not seed_mods:
+        return "Could not resolve any modules from the given files."
+
+    if mode == "predict":
+        result = RE.predict_missing_changes(seed_mods)
+        preds = result.get("predictions", []) if isinstance(result, dict) else result
+        if not preds:
+            return "No missing changes predicted — your changeset looks complete."
+        lines = ["**Predicted Missing Changes:**\n"]
+        for item in preds[:15]:
+            conf = f"{item.get('confidence', 0):.0%}"
+            lines.append(f"- `{item['module']}` (confidence: {conf}, weight: {item.get('weight', 0)})")
+            if item.get("causal_note"):
+                lines.append(f"  _{item['causal_note']}_")
+        return "\n".join(lines)
+
+    elif mode == "check":
+        blast = RE.get_blast_radius(seed_mods)
+        missing_result = RE.predict_missing_changes(seed_mods)
+        missing = missing_result.get("predictions", []) if isinstance(missing_result, dict) else missing_result
+        risk = RE.score_change_risk(seed_mods)
+        reviewers = RE.suggest_reviewers(seed_mods, top_k=3)
+
+        lines = [f"## Guardian Report\n"]
+        status = "PASS" if not missing else ("WARN" if len(missing) < 3 else "FAIL")
+        lines.append(f"**Verdict: {status}**\n")
+        lines.append(f"**Risk Score: {risk.get('risk_score', 0)}/100 ({risk.get('risk_level', 'LOW')})**\n")
+        lines.append(f"| Metric | Value |")
+        lines.append(f"|--------|-------|")
+        lines.append(f"| Changed modules | {len(seed_mods)} |")
+        lines.append(f"| Import neighbors | {len(blast.get('import_neighbors', []))} |")
+        lines.append(f"| Co-change neighbors | {len(blast.get('cochange_neighbors', []))} |")
+        lines.append(f"| Affected services | {len(blast.get('affected_services', []))} |")
+        if missing:
+            lines.append(f"\n### Likely Missing Files")
+            for m in missing[:5]:
+                lines.append(f"- `{m['module']}` (confidence: {m.get('confidence',0):.0%})")
+        if reviewers.get("reviewers"):
+            lines.append(f"\n### Suggested Reviewers")
+            for r in reviewers["reviewers"][:3]:
+                lines.append(f"- **{r['name']}** ({r['commits']} commits)")
+        return "\n".join(lines)
+
+    elif mode == "reviewers":
+        result = RE.suggest_reviewers(seed_mods, top_k=5)
+        if not result.get("reviewers"):
+            return "No reviewer data available for these modules."
+        lines = ["**Suggested Reviewers:**\n"]
+        for r in result["reviewers"]:
+            mods_str = ", ".join(f"`{m}`" for m in r.get("modules", [])[:3])
+            lines.append(f"- **{r['name']}** ({r['email']}): {r['commits']} commits — {mods_str}")
+        return "\n".join(lines)
+
+    elif mode == "risk":
+        result = RE.score_change_risk(seed_mods)
+        lines = [f"**Risk Score: {result.get('risk_score', 0)}/100 ({result.get('risk_level', 'LOW')})**\n"]
+        components = result.get("components", {})
+        for name, comp in components.items():
+            lines.append(f"- **{name}**: {comp.get('score', 0)}/100 — {comp.get('detail', '')}")
+        return "\n".join(lines)
+
+    return "Unknown guardian mode."
+
+
 TOOL_DISPATCH: dict = {
     "get_function_body":     lambda a: tool_get_function_body(a.get("fn_id",""), a.get("reason","")),
     "trace_callees":         lambda a: tool_trace_callees(a.get("fn_id",""), a.get("reason","")),
@@ -985,6 +1121,11 @@ TOOL_DISPATCH: dict = {
     "search_docs":           lambda a: tool_search_docs(a.get("query",""), a.get("tags",[])),
     "get_gateway_integrity": lambda a: tool_get_gateway_integrity(a.get("gateway_name","")),
     "get_type_definition":   lambda a: tool_get_type_definition(a.get("type_name",""), a.get("service","")),
+    # ── Guardian / PR analysis tools ──────────────────────────────────────────
+    "predict_missing_changes": lambda a: _tool_guardian("predict", a.get("changed_files", []), a.get("min_confidence", 0.1)),
+    "check_my_changes":        lambda a: _tool_guardian("check", a.get("changed_files", [])),
+    "suggest_reviewers":       lambda a: _tool_guardian("reviewers", a.get("changed_files", [])),
+    "score_change_risk":       lambda a: _tool_guardian("risk", a.get("changed_files", [])),
     # ── HyperCode coding tools (available when _CODING_TOOLS_AVAILABLE) ───────
     "run_bash":   lambda a: (
         _run_bash(a.get("command",""), a.get("timeout"), None)
