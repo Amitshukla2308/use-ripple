@@ -7,10 +7,11 @@ HyperRetrieval builds a **structured knowledge graph** of your entire codebase �
 Point it at your source repos, run the build pipeline once, and AI tools in your org can answer questions grounded in real source code — with exact function names, module paths, and traced call chains — instead of guessing.
 
 **What ships in this repo:**
-- **Chat UI** (Chainlit) — engineers can ask architecture questions in plain English
-- **MCP server** — 8 tools that plug directly into Claude Code, Cursor, and Windsurf
-- **PR analyser** — blast-radius reports for CI/CD pipelines
-- **Retrieval engine** — the data layer; build anything else on top of it
+- **Chat UI** (Chainlit) — engineers ask architecture questions in plain English, configurable per org
+- **HRCode CLI** — interactive AI coding assistant with 20 tools, 26 slash commands, persistent memory
+- **MCP server** — 10 tools that plug directly into Claude Code, Cursor, and Windsurf
+- **Guardian Mode** — PR completeness analysis with risk scoring, suggested reviewers, and CI/CD integration
+- **Retrieval engine** — the data layer with 3-signal RRF fusion (vector + BM25 + co-change), Granger causality, ownership tracking
 
 ---
 
@@ -50,17 +51,20 @@ Indexes your codebase into five complementary data structures:
 
 | Index | What it stores | Used for |
 |-------|---------------|----------|
-| **Symbol graph** | Functions, types, modules + import edges | Navigation, blast-radius analysis |
-| **Vector index** | Semantic embedding of every symbol | Natural-language search |
-| **Body store** | Full source text per function | Code reading, LLM context |
+| **Symbol graph** | Functions, types, modules + import edges + Leiden clusters | Navigation, blast-radius, architecture mapping |
+| **Vector index** | Semantic embedding of every symbol (4096d) | Natural-language search |
+| **Body store** | Full source text per function | Code reading, LLM context, hallucination grounding |
 | **Call graph** | Caller/callee relationships | Flow tracing, impact analysis |
-| **Co-change index** | Files that historically change together | Risk-aware PR review |
+| **Co-change index** | Modules that historically change together (weighted) | Risk-aware PR review, missing change prediction |
+| **Granger causality index** | Directional causal relationships between modules | "A causes B to change" predictions with temporal lag |
+| **Ownership index** | Per-module git ownership from commit history | Suggested reviewers for PRs |
 
 Once indexed, the same data powers multiple entry points — all shipped in this repo:
 
-- **Chat UI** (Chainlit) — conversational interface for engineers to explore the codebase
-- **MCP server** — exposes tools directly inside AI coding assistants (Claude Code, Cursor, Windsurf)
-- **PR analyser** — CLI blast-radius report for CI/CD pipelines
+- **Chat UI** (Chainlit) — conversational interface for engineers, configurable system prompt per org
+- **HRCode CLI** — full AI coding assistant with ReAct loop, persistent memory, 20 tools
+- **MCP server** — 10 tools for AI coding assistants (Claude Code, Cursor, Windsurf)
+- **Guardian Mode** — PR completeness analysis: blast radius, missing changes, risk score (0-100), suggested reviewers, CI/CD GitHub Action
 
 ---
 
@@ -96,37 +100,29 @@ Adding a new language means implementing `parse_<lang>_file()` in `build/01_extr
 
 ```
 hyperretrieval/
-├── build/                     ← 8-stage pipeline (run once to build indexes)
+├── build/                     ← 11-stage pipeline (run once to build indexes)
+│   ├── 00_export_git_history.py ← Export git history from repos → git_history.json
 │   ├── 01_extract.py          ← Parse source → symbols, bodies, call graph, log patterns
 │   │                             Tree-sitter for Haskell/Rust/JS/TS/Groovy; ast for Python
 │   │                             Parallel across services (multiprocessing.Pool)
 │   ├── 02_build_graph.py      ← Build NetworkX graph, Leiden clustering at module level
 │   ├── 03_embed.py            ← GPU-batch embed all symbols → LanceDB (vectors.lance)
 │   ├── 04_summarize.py        ← LLM-summarize each cluster → human-readable descriptions
-│   │                             Adaptive sampling: scales with cluster size, business-logic
-│   │                             modules (Product, OLTP, Flow, Handler) sampled first
 │   ├── 05_package.py          ← Copy final artifacts into workspace/artifacts/
 │   ├── 06_build_cochange.py   ← Parse git history → co-change index (streaming, O(1) memory)
 │   ├── 07_chunk_docs.py       ← Chunk + embed markdown docs → docs.lance via embed server
-│   │                             Reads docs/ and docs/generated/ from workspace
-│   ├── 08_generate_arch_docs.py ← [BETA] Auto-generate architecture docs via LLM
-│   │                             Generate → Verify → Correct loop, saves to docs/generated/
-│   │                             See file header for known issues and improvement TODOs
-│   ├── 09_build_viz_data.py   ← Build viz_data.json from graph + co-change (< 3 MB, fast)
-│   ├── 09b_build_scatter_data.py ← Build scatter_data.json via PCA→UMAP on symbol vectors
-│   │                             (~1 min; requires umap-learn, scikit-learn)
+│   ├── 08_build_ownership.py  ← Build per-module git ownership index for reviewer suggestions
+│   ├── 09_build_granger.py    ← Granger causality — directional co-change prediction
+│   │                             Outputs causal pairs with p-values and temporal lag
+│   ├── 09b_build_viz_data.py  ← Build viz_data.json from graph + co-change (< 3 MB)
 │   └── run_pipeline.sh        ← Run all stages end-to-end
-│                                 Flags: --from-stage N, --only-stage N
-│                                 Auto-cleans stale outputs before each run
-│                                 Stage order: 1→2→3→4→5→6→8→7 (8 before 7 so generated
-│                                 docs are embedded by stage 7)
 │
 ├── serve/                     ← Core engine — all retrieval logic lives here
 │   ├── retrieval_engine.py    ← Core library: loads all indexes, graph traversal,
 │   │                             BM25 + vector RRF fusion search, co-change queries
 │   ├── embed_server.py        ← Shared embedding server (port 8001) — start FIRST
-│   ├── mcp_server.py          ← MCP SSE server (port 8002) — 8 tools for AI agents
-│   ├── pr_analyzer.py         ← CLI blast-radius report for CI/CD pipelines
+│   ├── mcp_server.py          ← MCP SSE server (port 8002) — 10 tools for AI agents
+│   ├── pr_analyzer.py         ← Guardian Mode: blast-radius, risk scoring, suggested reviewers
 │   ├── public/                ← Chainlit CSS + theme
 │   └── .chainlit/             ← Chainlit config (name, layout, CSS path)
 │
@@ -548,7 +544,7 @@ Add to `.mcp.json` in your project root:
 
 Works with Claude Code, Cursor, and Windsurf.
 
-### The 8 MCP tools
+### The 10 MCP tools
 
 | Tool | Use when |
 |------|----------|
@@ -558,12 +554,14 @@ Works with Claude Code, Cursor, and Windsurf.
 | `get_function_body` | Read source of a function by its fully-qualified ID. |
 | `trace_callers` | Who calls this function? (upstream impact) |
 | `trace_callees` | What does this function call? (downstream dependencies) |
-| `get_blast_radius` | Import graph + co-change impact for changed files or modules. |
+| `get_blast_radius` | Import graph + co-change + Granger causality impact for changed files. |
+| `predict_missing_changes` | PR review: given changed files, predict what's likely missing from the changeset. |
+| `check_my_changes` | Guardian Mode: full PR completeness report — risk score, blast radius, suggested reviewers. |
 | `get_context` | **Last resort.** Pre-built context block (large). Use only if targeted searches failed. |
 
 **Optimal chain:** `search_modules → get_module → get_function_body → trace_callees`
 
-**Retrieval:** `search_symbols` uses BM25 + dense vector **RRF fusion** (`unified_search`). Results are ranked by Reciprocal Rank Fusion across both signals — keyword hits for exact identifiers, vector search for semantic similarity. Co-change data is added as a structural coupling signal on top.
+**Retrieval:** `search_symbols` uses **3-signal RRF fusion** (`unified_search`) — BM25 keyword hits, dense vector semantic search, and co-change graph expansion. Results are ranked by Reciprocal Rank Fusion across all three signals. Granger causality adds directional causal predictions for impact analysis.
 
 ---
 
