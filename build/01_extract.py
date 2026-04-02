@@ -703,6 +703,15 @@ def parse_python_file(path: pathlib.Path, service: str) -> tuple[list, list, dic
 
     src_lines = src.splitlines()
 
+    # Build set of sibling modules for resolving bare imports
+    _dir = path.parent
+    _sibling_mods = {}
+    for _sib in _dir.glob("*.py"):
+        if _sib.name != "__init__.py":
+            _sib_mod = str(_sib.relative_to(REPO_ROOT)).replace("/", ".").replace("\\", ".").removesuffix(".py")
+            _sib_bare = _sib.stem  # bare name (e.g., "retrieval_engine")
+            _sibling_mods[_sib_bare] = _sib_mod
+
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             mod = node.module if isinstance(node, ast.ImportFrom) else None
@@ -710,7 +719,9 @@ def parse_python_file(path: pathlib.Path, service: str) -> tuple[list, list, dic
                           else [ast.alias(name=mod or "")]):
                 target = mod or alias.name
                 if target:
-                    edges.append({"from": module, "to": target, "kind": "import", "lang": "python"})
+                    # Resolve bare imports to full path if sibling exists
+                    resolved = _sibling_mods.get(target, target)
+                    edges.append({"from": module, "to": resolved, "kind": "import", "lang": "python"})
 
         elif isinstance(node, ast.FunctionDef):
             args = [a.arg for a in node.args.args]
