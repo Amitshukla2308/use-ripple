@@ -61,6 +61,8 @@ _cochange_loaded_at: float = 0.0
 _mg_to_cc:           dict  = {}   # MG dot-name → cochange ::key
 _ownership_name_map: dict  = {}   # MG dot-name → ownership ::key
 _cc_to_mg:           dict  = {}   # cochange ::key → MG dot-name
+_filepath_suffix_idx: dict = {}   # normalized_basename → [(normalized_full_path, module)]
+_stem_to_modules:    dict  = {}   # stem → [module_name, ...]
 
 body_store:   dict = {}
 call_graph:   dict = {}
@@ -340,10 +342,20 @@ def initialize(
             mod = d.get("module", "")
             if mod:
                 file_to_nodes.setdefault(mod, []).append(nid)
+                # Build stem→modules index for fast stem lookups
+                for sep in (".", "::"):
+                    stem = mod.rsplit(sep, 1)[-1]
+                    if stem:
+                        _stem_to_modules.setdefault(stem, []).append(mod)
             f = d.get("file", "")
             m = d.get("module", "") or nid
             if f and m:
                 filepath_to_module[f] = m
+        # Build suffix index for fast file→module resolution
+        for known_path, mod in filepath_to_module.items():
+            norm = known_path.replace("\\", "/").lstrip("/")
+            basename = norm.rsplit("/", 1)[-1]
+            _filepath_suffix_idx.setdefault(basename, []).append((norm, mod))
 
         # v6 stores (all optional — degrade gracefully)
         for path, store, name in [
@@ -781,27 +793,35 @@ def resolve_files_to_modules(file_paths: list) -> dict:
         fp_norm = fp.replace("\\", "/").lstrip("/")
         found = []
 
-        # 1 + 2: suffix match with shrinking window
-        fp_parts = fp_norm.split("/")
-        for n in range(len(fp_parts), 0, -1):
-            suffix = "/".join(fp_parts[-n:])
-            for known_path, mod in filepath_to_module.items():
-                known_norm = known_path.replace("\\", "/").lstrip("/")
-                if known_norm == suffix or known_norm.endswith("/" + suffix) or suffix.endswith("/" + known_norm):
-                    if mod not in found:
-                        found.append(mod)
-            if found:
-                break
+        # 1 + 2: suffix match via pre-built index (O(candidates) not O(all_paths))
+        basename = fp_norm.rsplit("/", 1)[-1]
+        candidates = _filepath_suffix_idx.get(basename, [])
+        if candidates:
+            fp_parts = fp_norm.split("/")
+            for n in range(len(fp_parts), 0, -1):
+                suffix = "/".join(fp_parts[-n:])
+                for known_norm, mod in candidates:
+                    if known_norm == suffix or known_norm.endswith("/" + suffix) or suffix.endswith("/" + known_norm):
+                        if mod not in found:
+                            found.append(mod)
+                if found:
+                    break
 
-        # 3: stem match against MG
-        if not found and MG is not None:
+        # 3: stem match via pre-built index, fallback to MG scan if index empty
+        if not found:
             stem = pathlib.Path(fp_norm).stem
-            for mod in MG.nodes():
-                if mod.split(".")[-1] == stem or mod.split("::")[-1] == stem:
+            stem_candidates = _stem_to_modules.get(stem, [])
+            if stem_candidates:
+                for mod in stem_candidates[:3]:
                     if mod not in found:
                         found.append(mod)
-                    if len(found) >= 3:
-                        break
+            elif MG is not None:
+                for mod in MG.nodes():
+                    if mod.split(".")[-1] == stem or mod.split("::")[-1] == stem:
+                        if mod not in found:
+                            found.append(mod)
+                        if len(found) >= 3:
+                            break
 
         # 4: direct path→module conversion (zero-config fallback)
         # Convert file path to dot-notation: serve/retrieval_engine.py → serve.retrieval_engine
