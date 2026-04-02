@@ -59,6 +59,7 @@ file_to_nodes:       dict  = {}   # module_name → [node_id, ...]
 filepath_to_module:  dict  = {}   # relative_file_path → module_name
 _cochange_loaded_at: float = 0.0
 _mg_to_cc:           dict  = {}   # MG dot-name → cochange ::key
+_ownership_name_map: dict  = {}   # MG dot-name → ownership ::key
 _cc_to_mg:           dict  = {}   # cochange ::key → MG dot-name
 
 body_store:   dict = {}
@@ -389,6 +390,19 @@ def initialize(
             meta_oi = oi.get("meta", {})
             print(f"  {meta_oi.get('total_modules',0):,} modules  "
                   f"{meta_oi.get('total_unique_authors',0):,} authors")
+            # Build MG→ownership name map (same strategy as cochange)
+            _ownership_name_map.clear()
+            for own_key in ownership_index:
+                parts = own_key.split("::")
+                mg_name = None
+                for i, part in enumerate(parts):
+                    if part and part[0].isupper():
+                        mg_name = ".".join(parts[i:])
+                        break
+                if mg_name is None and len(parts) >= 2:
+                    mg_name = ".".join(parts[1:])
+                if mg_name and mg_name not in _ownership_name_map:
+                    _ownership_name_map[mg_name] = own_key
 
         granger_path = artifact_dir / "granger_index.json"
         if granger_path.exists():
@@ -999,9 +1013,14 @@ def suggest_reviewers(changed_modules: list, top_k: int = 5) -> dict:
     author_scores = {}  # email -> {"score", "modules", "commits", "name"}
 
     for mod in all_modules:
-        # Try direct lookup, then cochange key
+        # Try direct lookup, then ownership name map, then last segment, then cochange key
+        own_key = _ownership_name_map.get(mod, "")
+        last_seg = mod.rsplit(".", 1)[-1] if "." in mod else mod
+        own_key_last = _ownership_name_map.get(last_seg, "")
         cc_key = _resolve_cc(mod)
-        authors = ownership_index.get(mod) or ownership_index.get(cc_key) or []
+        authors = (ownership_index.get(mod) or ownership_index.get(own_key)
+                   or ownership_index.get(own_key_last)
+                   or ownership_index.get(cc_key) or [])
 
         for author in authors:
             email = author["email"]
