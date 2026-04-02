@@ -427,21 +427,6 @@ AGENT_TOOLS = [
         }, "required": ["changed_files"]}
     }},
     {"type": "function", "function": {
-        "name": "check_my_changes",
-        "description": (
-            "SDLC Guardian: comprehensive PR review combining blast radius + missing changes "
-            "+ risk score + suggested reviewers in one call.\n\n"
-            "Returns a PASS/WARN/FAIL verdict with actionable details.\n\n"
-            "Use this when reviewing a PR or before submitting changes."
-        ),
-        "parameters": {"type": "object", "properties": {
-            "changed_files": {
-                "type": "array", "items": {"type": "string"},
-                "description": "List of changed file paths or module names."
-            }
-        }, "required": ["changed_files"]}
-    }},
-    {"type": "function", "function": {
         "name": "suggest_reviewers",
         "description": (
             "Suggest PR reviewers based on module ownership from git history.\n\n"
@@ -455,22 +440,6 @@ AGENT_TOOLS = [
             }
         }, "required": ["changed_files"]}
     }},
-    {"type": "function", "function": {
-        "name": "score_change_risk",
-        "description": (
-            "Compute a composite risk score (0-100) for a set of changes.\n\n"
-            "Components: blast radius scope, coverage gap (missing co-changes), "
-            "reviewer concentration (bus factor), service spread.\n\n"
-            "Returns: score, level (LOW/MEDIUM/HIGH/CRITICAL), breakdown per component."
-        ),
-        "parameters": {"type": "object", "properties": {
-            "changed_files": {
-                "type": "array", "items": {"type": "string"},
-                "description": "List of changed file paths or module names."
-            }
-        }, "required": ["changed_files"]}
-    }},
-
     # ── HyperCode coding tools ────────────────────────────────────────────────
     # Enabled when apps/cli/tools/ is importable (_CODING_TOOLS_AVAILABLE = True).
     # These allow the Chainlit chat + MCP server to read/write/edit files and run
@@ -1123,9 +1092,7 @@ TOOL_DISPATCH: dict = {
     "get_type_definition":   lambda a: tool_get_type_definition(a.get("type_name",""), a.get("service","")),
     # ── Guardian / PR analysis tools ──────────────────────────────────────────
     "predict_missing_changes": lambda a: _tool_guardian("predict", a.get("changed_files", []), a.get("min_confidence", 0.1)),
-    "check_my_changes":        lambda a: _tool_guardian("check", a.get("changed_files", [])),
     "suggest_reviewers":       lambda a: _tool_guardian("reviewers", a.get("changed_files", [])),
-    "score_change_risk":       lambda a: _tool_guardian("risk", a.get("changed_files", [])),
     # ── HyperCode coding tools (available when _CODING_TOOLS_AVAILABLE) ───────
     "run_bash":   lambda a: (
         _run_bash(a.get("command",""), a.get("timeout"), None)
