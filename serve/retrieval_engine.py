@@ -55,6 +55,8 @@ cluster_summaries:   dict  = {}
 cochange_index:      dict  = {}
 ownership_index:     dict  = {}   # module → [{"email","name","commits"}, ...]
 granger_index:       dict  = {}   # "A→B" → {"source","target","best_lag","p_value","f_statistic"}
+community_index:     dict  = {}   # community_id → {"size","services","label","cross_service"}
+module_to_community: dict  = {}   # module_cc_key → community_id
 file_to_nodes:       dict  = {}   # module_name → [node_id, ...]
 filepath_to_module:  dict  = {}   # relative_file_path → module_name
 _cochange_loaded_at: float = 0.0
@@ -389,6 +391,28 @@ def initialize(
             _cochange_loaded_at = cochange_path.stat().st_mtime
             meta = ci.get("meta", {})
             print(f"  {meta.get('total_modules',0):,} modules  {meta.get('total_pairs',0):,} pairs")
+
+            # Load cross-repo co-change index (additive — merges into same dict)
+            cross_cochange_path = artifact_dir / "cross_cochange_index.json"
+            if cross_cochange_path.exists():
+                print("Loading cross-repo co-change index...")
+                with open(str(cross_cochange_path)) as _f:
+                    xci = json.load(_f)
+                xedges = xci.get("edges", {})
+                # Merge: for existing modules, append new cross-repo partners
+                for mod, partners in xedges.items():
+                    if mod in cochange_index:
+                        existing = {p["module"] for p in cochange_index[mod]}
+                        for p in partners:
+                            if p["module"] not in existing:
+                                cochange_index[mod].append(p)
+                    else:
+                        cochange_index[mod] = partners
+                xmeta = xci.get("meta", {})
+                print(f"  +{xmeta.get('total_modules',0):,} cross-repo modules  "
+                      f"{xmeta.get('total_pairs',0):,} pairs  "
+                      f"{xmeta.get('repo_pairs',0)} repo pairs")
+
             _build_cochange_name_map()
         else:
             print("  co-change index: not built yet")
@@ -425,6 +449,18 @@ def initialize(
             meta_gi = gi.get("metadata", {})
             print(f"  {meta_gi.get('significant_results', 0):,} causal pairs  "
                   f"(p<{meta_gi.get('p_threshold', 0.05)})")
+
+        community_path = artifact_dir / "community_index.json"
+        if community_path.exists():
+            print("Loading community index...")
+            with open(str(community_path)) as _f:
+                ci_data = json.load(_f)
+            community_index.update(ci_data.get("communities", {}))
+            module_to_community.update(ci_data.get("module_to_community", {}))
+            meta_ci = ci_data.get("meta", {})
+            print(f"  {meta_ci.get('n_communities', 0)} communities  "
+                  f"{meta_ci.get('cross_service_communities', 0)} cross-service  "
+                  f"modularity={meta_ci.get('modularity', 0)}")
 
         # Inject synthetic co-change edges from call_graph (cold-start fix)
         if call_graph and cochange_index is not None:
@@ -964,13 +1000,46 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
     tiered_list = sorted(tiered.values(), key=lambda x: -x["confidence"])
     # ── End tiered impact ───────────────────────────────────────────────
 
-    return {
+    # ── Community context (if available) ────────────────────────────────
+    community_context = None
+    if module_to_community:
+        seed_communities = set()
+        for s in seed:
+            cc_key = _resolve_cc(s)
+            comm = module_to_community.get(cc_key)
+            if comm is not None:
+                seed_communities.add(str(comm))
+        if seed_communities:
+            affected_communities = set(seed_communities)
+            for item in tiered_list[:20]:  # check top impacted modules
+                cc_key = _resolve_cc(item["module"])
+                comm = module_to_community.get(cc_key)
+                if comm is not None:
+                    affected_communities.add(str(comm))
+            community_context = {
+                "seed_communities": sorted(seed_communities),
+                "affected_communities": sorted(affected_communities),
+                "cross_community": len(affected_communities) > len(seed_communities),
+                "details": {
+                    cid: {
+                        "label": community_index.get(cid, {}).get("label", ""),
+                        "size": community_index.get(cid, {}).get("size", 0),
+                        "cross_service": community_index.get(cid, {}).get("cross_service", False),
+                    }
+                    for cid in affected_communities if cid in community_index
+                },
+            }
+
+    result = {
         "seed_modules":       seed,
         "import_neighbors":   import_neighbors,
         "cochange_neighbors": cochange_neighbors,
         "affected_services":  sorted(affected_services),
         "tiered_impact":      tiered_list,
     }
+    if community_context:
+        result["community_context"] = community_context
+    return result
 
 
 def predict_missing_changes(changed_modules: list, min_weight: int = 5,
