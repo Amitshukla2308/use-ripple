@@ -9,7 +9,7 @@ Clean ReAct architecture:
 
 No pre-retrieval, no fast_route, no context pre-loading.
 """
-import asyncio, hashlib, json, os, pathlib, sys, time, threading, uuid
+import asyncio, hashlib, hmac, json, os, pathlib, sys, time, threading, uuid
 import chainlit as cl
 import chainlit.data as cl_data
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
@@ -121,8 +121,8 @@ def _hash_password(password: str) -> str:
 
 def _verify_password(stored_hash: str, supplied: str) -> bool:
     if stored_hash.startswith("sha256:"):
-        return hashlib.sha256(supplied.encode()).hexdigest() == stored_hash[7:]
-    return stored_hash == supplied   # plain-text fallback (legacy config.yaml entries)
+        return hmac.compare_digest(hashlib.sha256(supplied.encode()).hexdigest(), stored_hash[7:])
+    return False
 
 
 def _db_get_account(username: str) -> "dict | None":

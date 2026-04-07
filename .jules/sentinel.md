@@ -1,0 +1,4 @@
+## 2024-04-07 - [Security] Fix Timing Attack and Plaintext Password Fallback in `_verify_password`
+**Vulnerability:** The password verification logic in `apps/chat/demo_server_v6.py` was vulnerable to timing attacks due to the use of non-constant time comparison (`==`) for comparing password hashes. Additionally, there was a fallback mechanism allowing plaintext passwords to bypass the hash check if the password was not prefixed with `sha256:`.
+**Learning:** Legacy configurations allowed plaintext entries in `config.yaml`, which compromised system security if attackers could leverage it. Also, comparing hashes with standard equality operations allows timing attacks.
+**Prevention:** Use `hmac.compare_digest` instead of `==` for hash comparisons to avoid timing attacks. Ensure the verification function strictly enforcing securely hashed passwords by removing the plaintext fallback and returning `False` when the `sha256:` prefix is not present.
