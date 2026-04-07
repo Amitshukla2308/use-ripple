@@ -65,12 +65,15 @@ jobs:
             RULES_ARG="--rules ${{ env.ARTIFACT_DIR }}/guardian_rules.yaml"
           fi
 
+          set +e
           REPORT=$(python3 .hyperretrieval/apps/cli/pr_analyzer.py \
             --mode guardian \
             --artifact-dir "${{ env.ARTIFACT_DIR }}" \
             $RULES_ARG \
             --files ${{ steps.changed.outputs.files }} \
             2>/dev/null)
+          PR_EXIT_CODE=$?
+          set -e
 
           # Save report for comment step
           echo "$REPORT" > /tmp/guardian_report.md
@@ -83,7 +86,10 @@ jobs:
             --files ${{ steps.changed.outputs.files }} \
             2>/dev/null > /tmp/guardian_report.json || true
 
+          exit $PR_EXIT_CODE
+
       - name: Post PR comment
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |

@@ -183,18 +183,23 @@ jobs:
             RULES_ARG="--rules guardian_rules.yaml"
           fi
 
+          set +e
           REPORT=$(python3 .hyperretrieval-src/apps/cli/pr_analyzer.py \
             --mode guardian \
             --artifact-dir "${{ env.ARTIFACT_DIR }}" \
             $RULES_ARG \
             --files ${{ steps.changed.outputs.files }} \
-            2>/dev/null) || true
+            2>/dev/null)
+          PR_EXIT_CODE=$?
+          set -e
 
           echo "$REPORT" > /tmp/guardian_report.md
           echo "Generated Markdown report ($(wc -c < /tmp/guardian_report.md) bytes)"
 
+          exit $PR_EXIT_CODE
+
       - name: Run Guardian analysis (JSON)
-        if: steps.changed.outputs.count != '0'
+        if: always() && steps.changed.outputs.count != '0'
         id: guardian-json
         continue-on-error: true
         run: |
@@ -214,7 +219,7 @@ jobs:
           echo "Generated JSON report ($(wc -c < /tmp/guardian_report.json) bytes)"
 
       - name: Post PR comment
-        if: steps.changed.outputs.count != '0'
+        if: always() && steps.changed.outputs.count != '0'
         uses: actions/github-script@v7
         with:
           script: |
