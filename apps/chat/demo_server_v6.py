@@ -122,7 +122,7 @@ def _hash_password(password: str) -> str:
 def _verify_password(stored_hash: str, supplied: str) -> bool:
     if stored_hash.startswith("sha256:"):
         return hashlib.sha256(supplied.encode()).hexdigest() == stored_hash[7:]
-    return stored_hash == supplied   # plain-text fallback (legacy config.yaml entries)
+    return False   # plain-text fallback removed for security
 
 
 def _db_get_account(username: str) -> "dict | None":
