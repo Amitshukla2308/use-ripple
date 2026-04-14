@@ -38,7 +38,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install networkx lancedb pyyaml pyarrow
+        run: pip install networkx lancedb pyyaml pyarrow openai
 
       - name: Download artifacts
         if: ${{ vars.ARTIFACT_DOWNLOAD_URL != '' }}
