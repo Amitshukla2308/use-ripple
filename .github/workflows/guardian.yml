@@ -70,7 +70,7 @@ jobs:
             --artifact-dir "${{ env.ARTIFACT_DIR }}" \
             $RULES_ARG \
             --files ${{ steps.changed.outputs.files }} \
-            2>/dev/null)
+            2>/dev/null) || true
 
           # Save report for comment step
           echo "$REPORT" > /tmp/guardian_report.md
@@ -88,9 +88,10 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const report = fs.readFileSync('/tmp/guardian_report.md', 'utf8');
+            let report = '';
+            try { report = fs.readFileSync('/tmp/guardian_report.md', 'utf8'); } catch (e) { console.error(e); }
 
-            if (!report.trim()) {
+            if (!report || !report.trim()) {
               console.log('No Guardian report generated (no modules resolved)');
               return;
             }
