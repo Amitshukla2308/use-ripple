@@ -88,7 +88,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
 
       - name: Install build dependencies
         if: steps.cache-indexes.outputs.cache-hit != 'true' || github.event.inputs.force_rebuild == 'true' || github.event_name == 'schedule'
@@ -156,7 +155,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
 
       - name: Install analysis dependencies
         run: pip install networkx pyyaml lancedb pyarrow rank-bm25 ijson
