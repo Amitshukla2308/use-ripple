@@ -188,7 +188,7 @@ jobs:
             --artifact-dir "${{ env.ARTIFACT_DIR }}" \
             $RULES_ARG \
             --files ${{ steps.changed.outputs.files }} \
-            2>/dev/null) || true
+            2>/dev/null || true)
 
           echo "$REPORT" > /tmp/guardian_report.md
           echo "Generated Markdown report ($(wc -c < /tmp/guardian_report.md) bytes)"
