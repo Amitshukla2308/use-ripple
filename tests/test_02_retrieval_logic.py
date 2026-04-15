@@ -53,8 +53,12 @@ def _safe_import(name, *args, **kwargs):
         m.set_starters      = lambda f: f
         m.on_message        = lambda f: f
         m.on_chat_start     = lambda f: f
+        m.password_auth_callback = lambda f: f
+        m.action_callback = lambda a: lambda f: f
+        m.on_chat_resume = lambda f: f
         m.ChatProfile       = type("ChatProfile", (), {"__init__": lambda self, **kw: None})
         m.Starter           = type("Starter",     (), {"__init__": lambda self, **kw: None})
+        m.Action            = type("Action",      (), {"__init__": lambda self, **kw: None})
         m.Step    = _FakeCtx
         m.Message = _FakeCtx
         m.user_session = type("US", (), {

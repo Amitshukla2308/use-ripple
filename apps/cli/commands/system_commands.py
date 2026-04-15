@@ -8,6 +8,8 @@ import os
 import pathlib
 import subprocess
 import sys
+import shlex
+import shutil
 
 
 # ── /help ────────────────────────────────────────────────────────────────────
@@ -78,8 +80,7 @@ def cmd_doctor(args: str, session, engine) -> str:
 
     # Tools
     for tool in ("rg", "git", "pytest", "bun"):
-        found = subprocess.run(f"which {tool}", shell=True,
-                               capture_output=True).returncode == 0
+        found = shutil.which(tool) is not None
         checks.append(f"  {tool:<12}  : {'✓' if found else '○ optional'}")
 
     # ARTIFACT_DIR
@@ -190,7 +191,7 @@ def cmd_mcp(args: str, session, engine) -> str:
                "MCP server may not have started. Check ~/mcp_server.log"
 
     elif sub == "stop":
-        result = subprocess.run("fuser -k 8002/tcp", shell=True,
+        result = subprocess.run(shlex.split("fuser -k 8002/tcp"),
                                 capture_output=True, text=True)
         return "MCP server stopped." if result.returncode == 0 else \
                "Could not stop MCP server (may not be running)."

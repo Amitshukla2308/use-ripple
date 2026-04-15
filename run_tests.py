@@ -1,7 +1,7 @@
 import subprocess, sys
 
-REPO = "/home/beast/projects/hyperretrieval"
-PY   = "/home/beast/miniconda3/bin/python3"
+REPO = "."
+PY   = "python3"
 
 def run(label, cmd, env_extra=None, cwd=REPO):
     import os
@@ -21,8 +21,8 @@ results = []
 # ── 1. Import smoke tests ─────────────────────────────────────────────────────
 smoke = """
 import sys, pathlib
-sys.path.insert(0, '/home/beast/projects/hyperretrieval/serve')
-sys.path.insert(0, '/home/beast/projects/hyperretrieval')
+sys.path.insert(0, './serve')
+sys.path.insert(0, '.')
 
 print("1. importing retrieval_engine...")
 import retrieval_engine as RE
@@ -35,17 +35,17 @@ print(f"   OK — {len(T.AGENT_TOOLS)} agent tools, {len(T.TOOL_DISPATCH)} dispa
 print("3. importing mcp_server (no start)...")
 import importlib.util, types
 spec = importlib.util.spec_from_file_location("mcp_server",
-    "/home/beast/projects/hyperretrieval/serve/mcp_server.py")
+    "./serve/mcp_server.py")
 print("   OK — mcp_server found")
 
 print("4. importing demo_server_v6 (no start)...")
 spec2 = importlib.util.spec_from_file_location("demo_server_v6",
-    "/home/beast/projects/hyperretrieval/apps/chat/demo_server_v6.py")
+    "./apps/chat/demo_server_v6.py")
 print("   OK — demo_server_v6 found")
 
 print("5. importing pr_analyzer (no start)...")
 spec3 = importlib.util.spec_from_file_location("pr_analyzer",
-    "/home/beast/projects/hyperretrieval/apps/cli/pr_analyzer.py")
+    "./apps/cli/pr_analyzer.py")
 print("   OK — pr_analyzer found")
 
 print("\\nAll imports OK")

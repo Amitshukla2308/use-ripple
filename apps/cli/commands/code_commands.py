@@ -8,6 +8,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import shlex
+import shutil
 
 
 # ── /search ───────────────────────────────────────────────────────────────────
@@ -127,7 +129,7 @@ def cmd_test(args: str, session, engine) -> str:
             os.path.exists(os.path.join(cwd, m)) for m in markers if m
         ):
             result = subprocess.run(
-                runner_cmd, shell=True, capture_output=True, text=True,
+                shlex.split(runner_cmd), capture_output=True, text=True,
                 cwd=cwd, timeout=300,
             )
             out = (result.stdout + result.stderr).strip()
@@ -213,10 +215,9 @@ def cmd_lint(args: str, session, engine) -> str:
     for linter in (f"ruff check {target}", f"flake8 {target}",
                    f"pylint {target}", f"biome check {target}"):
         tool = linter.split()[0]
-        if subprocess.run(f"which {tool}", shell=True,
-                          capture_output=True).returncode == 0:
+        if shutil.which(tool) is not None:
             result = subprocess.run(
-                linter, shell=True, capture_output=True, text=True, cwd=cwd)
+                shlex.split(linter), capture_output=True, text=True, cwd=cwd)
             return (result.stdout + result.stderr).strip() or "No issues found."
 
     return "No linter found. Install ruff: pip install ruff"

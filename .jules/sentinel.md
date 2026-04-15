@@ -1,0 +1,6 @@
+## 2024-05-15 - Command Injection Vulnerabilities in Subprocess Execution
+**Vulnerability:** Found critical command injection vulnerabilities in CLI slash commands (`/test` and `/lint` in `apps/cli/commands/code_commands.py`) and command checks (`/doctor` and `/mcp` in `apps/cli/commands/system_commands.py`). User inputs and external variables were directly interpolated into strings and executed with `subprocess.run(..., shell=True)`. This could allow an attacker to append arbitrary shell commands (e.g., using `;` or `&&`).
+**Learning:** Using `shell=True` in `subprocess.run` with unsanitized arguments is extremely dangerous, particularly in a tool where user input dictates the executed command. This insecure pattern was used both for executing complex commands and performing basic checks like verifying tool existence using `which`.
+**Prevention:**
+1. Use `shutil.which(tool)` to verify the presence of an executable in the system PATH instead of spawning a shell command `subprocess.run(f"which {tool}", shell=True)`.
+2. Avoid `shell=True` when running executables. Instead, pass arguments as a list. When parsing user-provided strings containing command arguments, use `shlex.split(command_string)` for safe parsing into an argument list.
