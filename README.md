@@ -1,533 +1,69 @@
 # HyperRetrieval
 
-Large codebases defeat LLMs. Not because LLMs are incapable — because they never see the right code at the right time. RAG over raw files is too shallow. Fine-tuning is too slow. Context windows are too small for a 100k-symbol monorepo.
+**Every other code intelligence tool reads the code. HyperRetrieval reads the git history.**
 
-HyperRetrieval builds a **structured knowledge graph** of your entire codebase — symbols, call graphs, semantic embeddings, co-change history, and architecture docs — and exposes it as fast, precise retrieval that AI agents can actually use.
+Large codebases defeat LLMs — not because LLMs are incapable, but because they never see the right code at the right time. Static analysis tells you what *could* break. Git history tells you what *actually* breaks together. The gap between those two is where HyperRetrieval lives.
 
-Point it at your source repos, run the build pipeline once, and AI tools in your org can answer questions grounded in real source code — with exact function names, module paths, and traced call chains — instead of guessing.
+HyperRetrieval builds a **structured knowledge graph** of your entire codebase — symbols, call graphs, semantic embeddings, co-change history, activity metrics, cross-repo coupling, and Granger causality — then exposes it as fast, precise retrieval that AI agents can actually use.
 
-**What ships in this repo:**
-- **Chat UI** (Chainlit) — engineers ask architecture questions in plain English, configurable per org
-- **HRCode CLI** — interactive AI coding assistant with 20 tools, 26 slash commands, persistent memory
-- **MCP server** — 10 tools that plug directly into Claude Code, Cursor, and Windsurf
-- **Guardian Mode** — PR completeness analysis with risk scoring, suggested reviewers, and CI/CD integration
-- **Retrieval engine** — the data layer with 3-signal RRF fusion (vector + BM25 + co-change), Granger causality, ownership tracking
+Point it at your source repos, run the build pipeline once, and AI tools in your org get answers grounded in real source code with exact function names, module paths, and traced call chains.
 
 ---
 
-## Contents
+## What ships in this repo
 
-**Understanding the platform**
-- [What it does](#what-it-does)
-- [What data it works best on](#what-data-it-works-best-on)
-- [Language support](#language-support)
-- [Folder structure](#folder-structure)
-
-**Design**
-- [Applications you can build](#applications-you-can-build)
-- [Building a ReAct agent](#building-a-react-agent)
-- [Adding tools](#adding-tools)
-- [Adding a language parser](#adding-a-language-parser)
-
-**Setup**
-- [Setup from scratch](#setup-from-scratch)
-- [Embedding providers](#embedding-providers)
-- [Connecting AI agents via MCP](#connecting-ai-agents-via-mcp)
-- [Codebase visualisation](#codebase-visualisation)
-- [PR blast-radius analysis](#pr-blast-radius-analysis)
-- [Config reference](#config-reference)
-
-**Reference**
-- [Best practices](#best-practices)
-- [Design decisions and learnings](#design-decisions-and-learnings)
-- [Architecture deep-dive](#architecture-deep-dive)
-- [Troubleshooting](#troubleshooting)
+- **12 MCP tools** — plug directly into Claude Code, Cursor, and Windsurf
+- **Cursor IDE plugin** — zero-config marketplace plugin (`plugins/cursor/`)
+- **Chat UI** (Chainlit) — engineers ask architecture questions in plain English
+- **HRCode CLI** — AI coding assistant with 20 tools, 26 slash commands, persistent memory
+- **Guardian Mode** — PR completeness analysis: blast radius, risk scoring, suggested reviewers, CI/CD GitHub Action
+- **Blast Radius v2** — activity-weighted impact analysis; **recall@10 0.47** vs 0.11 for static-only (+322%)
+- **14-stage build pipeline** — indexes any multi-service codebase in one run
 
 ---
 
-## What it does
+## Why temporal signals matter — the research
 
-Indexes your codebase into five complementary data structures:
+HyperRetrieval's core thesis is that **temporal signals from git history outperform static code analysis** for predicting what actually needs to change. This was validated through a series of experiments on a 94K-symbol, 12-service production codebase (113,916 commits).
+
+### Key findings
+
+| Experiment | Finding | Key number |
+|-----------|---------|-----------|
+| **exp_001**: Cross-repo co-change validation | Signal is real (p < 10^-13) and **orthogonal** to import graph — only 0.54% overlap | 1.91x weight when import edge present |
+| **exp_003**: Change prediction model | Activity features dominate (79-84% importance); structural features add near-zero at short horizons | AUC 0.688 (full), 0.723 (hand-written only) |
+| **exp_004**: Structural feature ceiling | Import distance, same_service, same_cluster add +0.002 at K=3 but +0.031 at K=50 | 15x more important at long horizon |
+| **exp_005**: Cross-ecosystem validation | Activity dominance holds on Flask (Python) same as Juspay (Haskell) | 84% activity importance |
+| **blast_radius v2 benchmark** | Activity-weighted reranking on 563 real commits | recall@10: 0.11 -> 0.47 (+322%), MRR: 0.08 -> 0.36 (+359%) |
+| **"will_break" audit** | Only 14.9% of import neighbors ever actually co-change; 47.6% of modules have **zero** co-changing imports | Static "will break" labels are noise dressed as confidence |
+
+> *"A retrieval system using only structural signals misses ~98% of what cross-repo co-change captures."*
+
+Full experiment artifacts: `~/lab/experiments/`
+
+---
+
+## Data model
+
+HyperRetrieval indexes your codebase into complementary data structures:
 
 | Index | What it stores | Used for |
 |-------|---------------|----------|
 | **Symbol graph** | Functions, types, modules + import edges + Leiden clusters | Navigation, blast-radius, architecture mapping |
 | **Vector index** | Semantic embedding of every symbol (4096d) | Natural-language search |
-| **Body store** | Full source text per function | Code reading, LLM context, hallucination grounding |
+| **Body store** | Full source text per function | Code reading, LLM context |
 | **Call graph** | Caller/callee relationships | Flow tracing, impact analysis |
 | **Co-change index** | Modules that historically change together (weighted) | Risk-aware PR review, missing change prediction |
-| **Granger causality index** | Directional causal relationships between modules | "A causes B to change" predictions with temporal lag |
+| **Cross-repo co-change** | Modules across repos changing within +/-24h | Cross-service coupling invisible to import graph |
+| **Activity index** | Per-module commit frequency, recency, contributor count | Activity-weighted reranking in blast radius v2 |
+| **Community detection** | Leiden clusters on co-change graph | Identifying tightly-coupled module groups |
+| **Granger causality** | Directional "A causes B to change" with temporal lag | Causal impact predictions |
 | **Ownership index** | Per-module git ownership from commit history | Suggested reviewers for PRs |
-
-Once indexed, the same data powers multiple entry points — all shipped in this repo:
-
-- **Chat UI** (Chainlit) — conversational interface for engineers, configurable system prompt per org
-- **HRCode CLI** — full AI coding assistant with ReAct loop, persistent memory, 20 tools
-- **MCP server** — 10 tools for AI coding assistants (Claude Code, Cursor, Windsurf)
-- **Guardian Mode** — PR completeness analysis: blast radius, missing changes, risk score (0-100), suggested reviewers, CI/CD GitHub Action
+| **Author aliases** | Merged git identities (name/email variants) | Accurate ownership attribution |
 
 ---
 
-## What data it works best on
-
-- **Large, multi-service codebases** — 10k–200k symbols across 5–20 services is the sweet spot
-- **Codebases with meaningful git history** — co-change analysis requires commit history to be useful
-- **Mixed-language repos** — works well when services have clear boundaries and consistent module naming
-- **Codebases with internal documentation** — markdown docs are embedded alongside code and searchable together
-
-**Less effective for:**
-- Single-file or tiny projects (< 500 symbols) — the indexing overhead is not worthwhile
-- Repos with little or no git history
-- Codebases where the dominant language is not yet supported (see Language support below)
-
----
-
-## Language support
-
-| Language       | Symbols | Bodies | Call graph | Log patterns |
-|----------------|---------|--------|------------|--------------|
-| Haskell        | ✓       | ✓      | ✓ (approx) | ✓            |
-| Rust           | ✓       | ✓      | ✓          | ✓            |
-| JavaScript/TypeScript | ✓ | ✓   | ✓ (AST)    | —            |
-| Python         | ✓       | ✓      | ✓ (AST)    | —            |
-| Groovy         | ✓       | ✓      | —          | ✓            |
-
-Adding a new language means implementing `parse_<lang>_file()` in `build/01_extract.py` — see [Adding a language parser](#adding-a-language-parser).
-
----
-
-## Folder structure
-
-```
-hyperretrieval/
-├── build/                     ← 11-stage pipeline (run once to build indexes)
-│   ├── 00_export_git_history.py ← Export git history from repos → git_history.json
-│   ├── 01_extract.py          ← Parse source → symbols, bodies, call graph, log patterns
-│   │                             Tree-sitter for Haskell/Rust/JS/TS/Groovy; ast for Python
-│   │                             Parallel across services (multiprocessing.Pool)
-│   ├── 02_build_graph.py      ← Build NetworkX graph, Leiden clustering at module level
-│   ├── 03_embed.py            ← GPU-batch embed all symbols → LanceDB (vectors.lance)
-│   ├── 04_summarize.py        ← LLM-summarize each cluster → human-readable descriptions
-│   ├── 05_package.py          ← Copy final artifacts into workspace/artifacts/
-│   ├── 06_build_cochange.py   ← Parse git history → co-change index (streaming, O(1) memory)
-│   ├── 07_chunk_docs.py       ← Chunk + embed markdown docs → docs.lance via embed server
-│   ├── 08_build_ownership.py  ← Build per-module git ownership index for reviewer suggestions
-│   ├── 09_build_granger.py    ← Granger causality — directional co-change prediction
-│   │                             Outputs causal pairs with p-values and temporal lag
-│   ├── 09b_build_viz_data.py  ← Build viz_data.json from graph + co-change (< 3 MB)
-│   └── run_pipeline.sh        ← Run all stages end-to-end
-│
-├── serve/                     ← Core engine — all retrieval logic lives here
-│   ├── retrieval_engine.py    ← Core library: loads all indexes, graph traversal,
-│   │                             BM25 + vector RRF fusion search, co-change queries
-│   ├── embed_server.py        ← Shared embedding server (port 8001) — start FIRST
-│   ├── mcp_server.py          ← MCP SSE server (port 8002) — 10 tools for AI agents
-│   ├── pr_analyzer.py         ← Guardian Mode: blast-radius, risk scoring, suggested reviewers
-│   ├── public/                ← Chainlit CSS + theme
-│   └── .chainlit/             ← Chainlit config (name, layout, CSS path)
-│
-├── tools.py                   ← Org-customizable tool implementations (gitignored)
-│                                 AGENT_TOOLS, TOOL_DISPATCH, persona prompts
-│                                 Uses RE.unified_search() for BM25+vector RRF fusion
-│
-├── tools/
-│   └── viz/                   ← Codebase visualisation (port 8003)
-│       ├── index.html         ← D3 frontend: Services, Clusters, 2D Scatter views
-│       ├── serve.py           ← HTTP server (copies latest data files, serves on VIZ_PORT)
-│       ├── viz_data.json      ← Built by build/09_build_viz_data.py
-│       └── scatter_data.json  ← Built by build/09b_build_scatter_data.py
-│
-├── tests/
-│   ├── test_01_artifacts.py   ← Verify build outputs exist and are non-empty
-│   ├── test_02_retrieval_logic.py ← Unit tests for retrieval functions
-│   ├── test_03_canary.py      ← Smoke test: does a basic query return results?
-│   ├── test_04_retrieval_accuracy.py ← Benchmark: known-answer queries
-│   ├── test_05_integration.py ← End-to-end server + query test
-│   ├── test_06_auto_eval.py   ← LLM-as-judge retrieval quality eval
-│   └── run_all.sh
-│
-└── config.example.yaml        ← Template workspace config (copy to your workspace)
-```
-
-```
-workspaces/YOUR_ORG/           ← Org-specific data (not in git)
-├── config.yaml
-├── source/                    ← Your source repos (one subdirectory per service)
-├── artifacts/                 ← Indexes loaded at runtime
-│   ├── graph_with_summaries.json
-│   ├── vectors.lance/
-│   └── cochange_index.json
-├── output/                    ← Intermediate build outputs
-│   ├── body_store.json
-│   ├── call_graph.json
-│   ├── log_patterns.json
-│   ├── docs.lance/
-│   ├── viz_data.json          ← Built by 09_build_viz_data.py (services, clusters, edges)
-│   └── scatter_data.json      ← Built by 09b_build_scatter_data.py (114k symbol UMAP coords)
-├── docs/                      ← Markdown documentation (embedded in stage 7)
-└── git_history.json
-
-models/
-└── <embedding-model>/         ← Model weights (local provider only)
-```
-
----
-
-## Applications you can build
-
-The Chat UI and MCP server are two reference implementations. The retrieval engine is a general-purpose data layer — any application that benefits from understanding a codebase can be built on top of it.
-
-### What you can build with it
-
-**Developer tooling**
-- Automated onboarding guides — generate a "tour" of any service for new engineers
-- Codebase-aware code review bots — flag changes that touch historically fragile modules
-- On-call runbooks — auto-generated from log patterns and call graphs, linked to actual code
-- IDE plugins — inline answers to "what does this function do?" without leaving the editor
-
-**Engineering operations**
-- Incident response assistants — given an error log, trace back to the responsible module and its owner
-- Dependency audits — identify which services depend on a library before upgrading it
-- Security scanning agents — find every location where sensitive data (credentials, PAN, tokens) is handled
-- Technical debt dashboards — surface modules with high co-change churn, low test coverage, or complex call graphs
-
-**AI agent infrastructure**
-- Coding agents that understand your internal APIs without fine-tuning
-- Test generation agents — read a function body and generate unit tests grounded in actual behaviour
-- Migration assistants — trace all call sites before deprecating an API
-- Documentation generators — auto-draft docstrings and API guides from source + commit history
-
-**CI/CD integration**
-- Pre-merge blast-radius checks — block risky changes automatically
-- Change-linked release notes — describe what changed and what it affects
-- Cross-service impact summaries for release managers
-
-The pattern in all cases is the same: **retrieve relevant context from the index, pass it to an LLM, act on the answer.**
-
----
-
-## Building a ReAct agent
-
-`retrieval_engine.py` is the data layer. You can write any agent that uses it — the Chat UI and MCP server are just two examples. Here is the minimal pattern:
-
-### How ReAct works
-
-ReAct (Reason + Act) is a loop where an LLM:
-1. Reads the question and any prior tool results
-2. Decides which tool to call (or stops if it has enough information)
-3. The tool runs and the result is appended to the conversation
-4. Repeat until the LLM produces a final answer
-
-```
-User question
-     ↓
-[LLM] → tool_call: search_modules("payment gateway")
-     ↓
-[Tool runs] → returns module list
-     ↓
-[LLM] → tool_call: get_function_body("Gateway.processPayment")
-     ↓
-[Tool runs] → returns source code
-     ↓
-[LLM] → no more tool calls → final answer streamed to user
-```
-
-### Minimal agent loop
-
-```python
-import retrieval_engine as RE
-import tools  # AGENT_TOOLS and TOOL_DISPATCH live here
-from openai import OpenAI
-
-RE.initialize("/path/to/workspaces/YOUR_ORG/artifacts")
-client = OpenAI(api_key="...", base_url="...")
-
-def run_agent(question: str) -> str:
-    messages = [
-        {"role": "system", "content": "You are a codebase expert. Use tools to answer questions."},
-        {"role": "user",   "content": question},
-    ]
-
-    for _ in range(12):   # max tool calls
-        resp = client.chat.completions.create(
-            model="your-model",
-            messages=messages,
-            tools=tools.AGENT_TOOLS,
-            tool_choice="auto",
-        )
-        msg = resp.choices[0].message
-
-        if not msg.tool_calls:
-            return msg.content   # LLM finished reasoning
-
-        # Append assistant turn + execute each tool
-        messages.append({"role": "assistant", "content": msg.content,
-                         "tool_calls": [...]})   # serialise tool_calls
-        for tc in msg.tool_calls:
-            import json
-            args   = json.loads(tc.function.arguments)
-            result = tools.TOOL_DISPATCH[tc.function.name](args)
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
-
-    return "Investigation limit reached."
-```
-
-The real implementations in `demo_server_v6.py` (Chainlit) and `mcp_server.py` follow this exact pattern — the only difference is how tool steps are rendered and how the final answer is delivered.
-
-### Choosing what to expose
-
-`AGENT_TOOLS` in `tools.py` is the full list of tools the LLM can call. `TOOL_DISPATCH` maps tool names to functions. Your agent can use all of them or a subset depending on the use case:
-
-| Use case | Recommended tools |
-|----------|------------------|
-| Answering architecture questions | search_modules, get_module, get_function_body, trace_callees |
-| Impact analysis / PR review | get_blast_radius, trace_callers, search_symbols |
-| Incident investigation | search_symbols, get_function_body, get_log_patterns |
-| Security audit | search_symbols, get_function_body, trace_callers |
-| Documentation generation | get_module, get_function_body, get_type_definition |
-
----
-
-## Adding tools
-
-Every tool in the system has three parts. Add all three to expose a new capability.
-
-### 1. The function in `tools.py`
-
-```python
-def tool_find_tests(fn_id: str) -> str:
-    """Find test files that reference a given function ID."""
-    if not RE.G or fn_id not in RE.G.nodes:
-        return f"Function '{fn_id}' not found."
-
-    # Your retrieval logic here — search the graph, body_store, call_graph, etc.
-    results = [
-        nid for nid, d in RE.G.nodes(data=True)
-        if "test" in d.get("file", "").lower()
-        and fn_id.split(".")[-1] in RE.body_store.get(nid, "")
-    ]
-    return "\n".join(results[:20]) or "No test references found."
-```
-
-### 2. The schema in `AGENT_TOOLS`
-
-`AGENT_TOOLS` is a list of OpenAI function-calling schemas. Add an entry so the LLM knows the tool exists and how to call it:
-
-```python
-{
-    "type": "function",
-    "function": {
-        "name": "find_tests",
-        "description": "Find test functions that reference a given function ID.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "fn_id": {
-                    "type": "string",
-                    "description": "Fully-qualified function ID, e.g. Module.SubModule.functionName"
-                }
-            },
-            "required": ["fn_id"]
-        }
-    }
-}
-```
-
-### 3. The dispatch entry in `TOOL_DISPATCH`
-
-```python
-TOOL_DISPATCH: dict = {
-    # ... existing tools ...
-    "find_tests": lambda a: tool_find_tests(a.get("fn_id", "")),
-}
-```
-
-### 4. Expose via MCP (optional)
-
-To make the tool available in AI coding assistants, add it to `serve/mcp_server.py`:
-
-```python
-@mcp.tool()
-def find_tests(fn_id: str) -> str:
-    """Find test functions that reference a given function ID."""
-    RE.ensure_initialized()
-    return RE.tool_find_tests(fn_id)
-```
-
-That is the complete change. The tool is now available in the Chat UI, MCP server, and any custom agent that uses `TOOL_DISPATCH`.
-
-### Adding a language parser
-
-To add support for a new language, implement the parser function in `build/01_extract.py` following the same contract as the existing parsers:
-
-```python
-def parse_javascript_file(path: pathlib.Path, service: str) \
-        -> tuple[list, list, dict, dict, dict]:
-    """Returns: (symbols, edges, body_store, call_store, log_store)"""
-    symbols, edges = [], []
-    body_store, call_store, log_store = {}, {}, {}
-
-    # Each symbol must have: id, name, module, kind, type, file, lang, service
-    # Each edge must have: from, to, kind, lang
-    # body_store: fn_id → source text
-    # call_store: fn_id → {"callees": [name, ...], "callers": []}
-    # log_store:  fn_id → [log string, ...]
-
-    return symbols, edges, body_store, call_store, log_store
-```
-
-Then add the file glob and parser call inside the service loop in `main()`.
-
----
-
-## Setup from scratch
-
-### Prerequisites
-
-```bash
-python3 --version   # 3.11+
-
-pip install chainlit openai lancedb sentence-transformers networkx \
-            pyarrow leidenalg igraph rank-bm25 mcp ijson pyyaml \
-            tree-sitter tree-sitter-haskell tree-sitter-rust tree-sitter-groovy
-
-# GPU needed only for local embedding (stage 3 + embed_server with EMBED_PROVIDER=local)
-# Cloud providers (openai, voyage, cohere, etc.) require no GPU — see Embedding providers
-nvidia-smi
-```
-
-### Step 1 — Prepare your workspace
-
-```bash
-mkdir -p ~/projects/workspaces/YOUR_ORG/{source,artifacts,output}
-
-# One subdirectory per service
-cp -r /path/to/service-a ~/projects/workspaces/YOUR_ORG/source/
-cp -r /path/to/service-b ~/projects/workspaces/YOUR_ORG/source/
-
-cp ~/projects/hyperretrieval/config.example.yaml \
-   ~/projects/workspaces/YOUR_ORG/config.yaml
-# Edit: set LLM endpoint, API keys, ports
-```
-
-### Step 2 — Export git history
-
-```bash
-# Run for each service repo, append to a single file
-git -C ~/projects/workspaces/YOUR_ORG/source/service-a \
-    log --all --name-only --format="COMMIT|%H|%s|%ae|%ai" \
-    >> ~/projects/workspaces/YOUR_ORG/git_history.json
-```
-
-### Step 3 — Choose an embedding provider
-
-See [Embedding providers](#embedding-providers) below. If using a cloud provider, skip the model download. If using local:
-
-```bash
-mkdir -p ~/projects/models
-python3 -c "
-from sentence_transformers import SentenceTransformer
-m = SentenceTransformer('Qwen/Qwen3-Embedding-8B')
-m.save('/path/to/models/qwen3-embed-8b')
-"
-```
-
-### Step 4 — Run the build pipeline
-
-```bash
-cd ~/projects/hyperretrieval
-
-export REPO_ROOT=~/projects/workspaces/YOUR_ORG/source
-export OUTPUT_DIR=~/projects/workspaces/YOUR_ORG/output
-export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
-export EMBED_MODEL=/path/to/models/your-embed-model  # or set EMBED_PROVIDER + API key
-export LLM_API_KEY=your_llm_api_key
-export LLM_BASE_URL=https://your-llm-endpoint
-export LLM_MODEL=your-model-name
-
-bash build/run_pipeline.sh   # 30 min – 2 h depending on codebase size
-
-# Resume from a specific stage (stages before N are skipped, outputs preserved)
-bash build/run_pipeline.sh --from-stage 4
-
-# Run a single stage only
-bash build/run_pipeline.sh --only-stage 7
-
-# Or stage by stage:
-python3 build/01_extract.py        # 5–15 min for 100k symbols (parallel across services)
-python3 build/02_build_graph.py    # ~2 min (Leiden clustering)
-python3 build/03_embed.py          # 20–60 min (GPU-heavy, or fast with cloud provider)
-python3 build/04_summarize.py      # ~30 min (LLM API, crash-safe/resumable)
-python3 build/05_package.py        # ~1 min
-python3 build/06_build_cochange.py # 10–30 min (streaming, safe on large history)
-python3 build/07_chunk_docs.py     # ~5 min
-python3 build/08_generate_arch_docs.py  # 10–30 min (LLM, resumable)
-```
-
-### Step 5 — Start the servers
-
-**Always start the embedding server first.** Only one process should load the embedding model at a time.
-
-```bash
-# 1. Embedding server
-export EMBED_MODEL=/path/to/model   # or EMBED_PROVIDER + API key
-cd ~/projects/hyperretrieval/serve
-python3 embed_server.py
-# Wait for: [embed_server] Ready on 127.0.0.1:8001
-
-# 2. Chat UI  (demo_server_v6.py is org-specific — gitignored, copy from template)
-export EMBED_SERVER_URL=http://localhost:8001
-export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
-cd ~/projects/hyperretrieval/serve
-chainlit run demo_server_v6.py --port 8000
-# Open http://localhost:8000
-
-# 3. MCP server (optional — for AI coding assistant integration)
-export EMBED_SERVER_URL=http://localhost:8001
-export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
-cd ~/projects/hyperretrieval
-python3 serve/mcp_server.py
-# SSE endpoint: http://localhost:8002/sse
-```
-
----
-
-## Embedding providers
-
-`embed_server.py` provides a unified HTTP interface regardless of where embeddings come from. Switch providers with a single env var — nothing else changes.
-
-```bash
-# Local GPU
-EMBED_MODEL=/path/to/model python3 serve/embed_server.py
-
-# Cloud providers (no GPU needed)
-EMBED_PROVIDER=openai  OPENAI_API_KEY=...  python3 serve/embed_server.py
-EMBED_PROVIDER=cohere  COHERE_API_KEY=...  python3 serve/embed_server.py
-EMBED_PROVIDER=voyage  VOYAGE_API_KEY=...  python3 serve/embed_server.py
-EMBED_PROVIDER=jina    JINA_API_KEY=...    python3 serve/embed_server.py
-
-# Fully local, no GPU (requires Ollama running)
-EMBED_PROVIDER=ollama  EMBED_PROVIDER_MODEL=nomic-embed-text  python3 serve/embed_server.py
-```
-
-| Provider | Default model | Dim | GPU needed |
-|----------|--------------|-----|------------|
-| local | qwen3-embed-8b | 4096 | Yes (~6GB) |
-| openai | see provider docs | varies | No |
-| cohere | see provider docs | varies | No |
-| voyage | voyage-code-3 | 1024 | No |
-| jina | jina-embeddings-v3 | 1024 | No |
-| ollama | nomic-embed-text | 768 | No (local CPU) |
-
-**Tested with:** local/qwen3-embed-8b, openai/text-embedding-3-large, voyage/voyage-code-3.
-
-**Guidance:** retrieval quality scales with embedding dimension. Use the highest-dimension model available to you, and prefer models evaluated on code or technical text retrieval. Check your provider's documentation for their recommended model for this workload.
-
-> **Important:** embedding dimension is fixed when you run stage 3. Switching providers later requires rebuilding `vectors.lance` by re-running `build/03_embed.py`.
-
----
-
-## Connecting AI agents via MCP
+## MCP tools (12)
 
 Add to `.mcp.json` in your project root:
 
@@ -544,8 +80,6 @@ Add to `.mcp.json` in your project root:
 
 Works with Claude Code, Cursor, and Windsurf.
 
-### The 10 MCP tools
-
 | Tool | Use when |
 |------|----------|
 | `search_modules` | **Start here.** Find which namespace contains relevant code. |
@@ -554,355 +88,347 @@ Works with Claude Code, Cursor, and Windsurf.
 | `get_function_body` | Read source of a function by its fully-qualified ID. |
 | `trace_callers` | Who calls this function? (upstream impact) |
 | `trace_callees` | What does this function call? (downstream dependencies) |
-| `get_blast_radius` | Import graph + co-change + Granger causality impact for changed files. |
-| `predict_missing_changes` | PR review: given changed files, predict what's likely missing from the changeset. |
-| `check_my_changes` | Guardian Mode: full PR completeness report — risk score, blast radius, suggested reviewers. |
-| `get_context` | **Last resort.** Pre-built context block (large). Use only if targeted searches failed. |
+| `get_blast_radius` | **v2: activity-weighted.** Import graph + co-change + cross-repo + Granger + activity reranking. Tiered: `will_break` / `likely_affected` / `worth_checking`. |
+| `predict_missing_changes` | PR review: predict files likely missing from a changeset. |
+| `check_my_changes` | Guardian Mode: blast radius + missing changes + risk score + reviewers in one call. |
+| `suggest_reviewers` | Module ownership from git history — who should review these files? |
+| `score_change_risk` | Composite risk score (0-100): blast radius + coverage gap + reviewer concentration + service spread. |
+| `get_context` | **Last resort.** Large context block. Use only if targeted searches failed. |
 
-**Optimal chain:** `search_modules → get_module → get_function_body → trace_callees`
+**Optimal chain:** `search_modules -> get_module -> get_function_body -> trace_callees`
 
-**Retrieval:** `search_symbols` uses **3-signal RRF fusion** (`unified_search`) — BM25 keyword hits, dense vector semantic search, and co-change graph expansion. Results are ranked by Reciprocal Rank Fusion across all three signals. Granger causality adds directional causal predictions for impact analysis.
-
----
-
-## Codebase visualisation
-
-HyperRetrieval includes an interactive D3 visualization served on port 8003. Build the data files once after the pipeline completes, then run the server.
-
-### Build the data files
-
-```bash
-# Step 1 — graph + cluster view data (fast, < 1s)
-ARTIFACT_DIR=workspaces/YOUR_ORG/artifacts OUTPUT_DIR=workspaces/YOUR_ORG/output \
-  python3 build/09_build_viz_data.py
-
-# Step 2 — symbol scatter data: PCA → UMAP on all embeddings (~1 min)
-# Requires: pip install umap-learn scikit-learn
-ARTIFACT_DIR=workspaces/YOUR_ORG/artifacts OUTPUT_DIR=workspaces/YOUR_ORG/output \
-  python3 build/09b_build_scatter_data.py
-```
-
-> Run step 2 only when no other server is loading data — it reads the full vector store into RAM.
-
-### Start the server
-
-```bash
-OUTPUT_DIR=workspaces/YOUR_ORG/output VIZ_PORT=8003 python3 tools/viz/serve.py
-```
-
-Open **http://localhost:8003**.
-
-### The three views
-
-**Services** — Force-directed graph of every service, sized by symbol count and connected by import edges (weight ≥ 3). Click a service node to jump to its clusters.
-
-**Clusters** — All named clusters colored by service, connected by top co-change edges (top 200 pairs, weight ≥ 5). Click a cluster to see its purpose, risk flags, key contracts, and top modules in the sidebar. Use the search box and service filter checkboxes to focus.
-
-**2D Scatter** — Every symbol projected to 2D via UMAP on its embedding vector. Rendered on canvas with a quadtree for hover lookup. Color by Service or Cluster. Semantically similar code clusters together regardless of which service it lives in.
-
-### What is and isn't sampled
-
-| Data | Shown |
-|------|-------|
-| Services | All |
-| Clusters | All named clusters |
-| Symbols in scatter | All — no sampling |
-| Service edges | All with weight ≥ 3 |
-| Cluster co-change edges | Top 200 by weight |
-| Modules per cluster (sidebar) | Top 60 by symbol count |
+**Retrieval:** `search_symbols` uses **3-signal RRF fusion** — BM25 keyword hits + dense vector semantic search + co-change graph expansion, merged via Reciprocal Rank Fusion (k=60).
 
 ---
 
-## PR blast-radius analysis
+## Blast Radius v2 — activity-weighted reranking
 
-`pr_analyzer.py` takes a list of changed files and returns a blast-radius report: which modules are directly affected, what else historically changes alongside them (co-change), and optionally an LLM-generated risk summary. Designed to run in CI/CD pipelines as a pre-merge gate.
+The original blast radius traversed the import graph to estimate impact. In practice, only **14.9% of import neighbors actually co-change** — the static graph massively over-predicts.
+
+v2 adds temporal signals:
+- **Within-repo co-change weight** — how often do these modules actually change together?
+- **Cross-repo co-change** — coupling across service boundaries invisible to the import graph
+- **Activity score** — commit frequency, recency, and contributor count
+- **Granger causality** — directional "A causes B to change" with temporal lag
+
+Results are tiered by confidence:
+
+| Tier | Meaning | Action |
+|------|---------|--------|
+| `will_break` | Direct import + high co-change | Must test |
+| `likely_affected` | Strong temporal signal | Should test |
+| `worth_checking` | Weak signal or structural-only | Review if time permits |
+
+**Benchmark (563 real commits):**
+
+| Metric | Static-only (v1) | Activity-weighted (v2) | Delta |
+|--------|-----------------|----------------------|-------|
+| recall@10 | 0.11 | 0.47 | +322% |
+| MRR | 0.08 | 0.36 | +359% |
+| recall@20 | — | 0.57 | — |
+| Latency | 0.9ms | 2.3ms | +1.4ms |
+
+---
+
+## Language support
+
+| Language | Symbols | Bodies | Call graph | Log patterns |
+|----------|---------|--------|------------|--------------|
+| Haskell | yes | yes | yes (approx) | yes |
+| Rust | yes | yes | yes | yes |
+| JavaScript/TypeScript | yes | yes | yes (AST) | — |
+| Python | yes | yes | yes (AST) | — |
+| Groovy | yes | yes | — | yes |
+| Go | yes | yes | yes | — |
+| Java | yes | yes | yes | — |
+
+Adding a new language: implement `parse_<lang>_file()` in `build/01_extract.py`.
+
+---
+
+## Setup from scratch
+
+### Prerequisites
 
 ```bash
+python3 --version   # 3.11+
+
+pip install chainlit openai lancedb sentence-transformers networkx \
+            pyarrow leidenalg igraph rank-bm25 mcp ijson pyyaml \
+            tree-sitter tree-sitter-haskell tree-sitter-rust tree-sitter-groovy
+```
+
+### Step 1 — Prepare your workspace
+
+```bash
+mkdir -p ~/projects/workspaces/YOUR_ORG/{source,artifacts,output}
+cp -r /path/to/service-a ~/projects/workspaces/YOUR_ORG/source/
+cp ~/projects/hyperretrieval/config.example.yaml ~/projects/workspaces/YOUR_ORG/config.yaml
+```
+
+### Step 2 — Export git history
+
+```bash
+python3 build/00_export_git_history.py --repo ~/projects/workspaces/YOUR_ORG/source/service-a \
+  --output ~/projects/workspaces/YOUR_ORG/git_history.json
+```
+
+### Step 3 — Choose an embedding provider
+
+```bash
+# Local GPU
+EMBED_MODEL=/path/to/model python3 serve/embed_server.py
+
+# Cloud providers (no GPU needed)
+EMBED_PROVIDER=openai  OPENAI_API_KEY=...  python3 serve/embed_server.py
+EMBED_PROVIDER=voyage  VOYAGE_API_KEY=...  python3 serve/embed_server.py
+EMBED_PROVIDER=cohere  COHERE_API_KEY=...  python3 serve/embed_server.py
+EMBED_PROVIDER=jina    JINA_API_KEY=...    python3 serve/embed_server.py
+EMBED_PROVIDER=ollama  EMBED_PROVIDER_MODEL=nomic-embed-text  python3 serve/embed_server.py
+```
+
+### Step 4 — Run the build pipeline
+
+```bash
+cd ~/projects/hyperretrieval
+export REPO_ROOT=~/projects/workspaces/YOUR_ORG/source
+export OUTPUT_DIR=~/projects/workspaces/YOUR_ORG/output
+export ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts
+
+bash build/run_pipeline.sh   # 30 min – 2 h depending on codebase size
+
+# Resume from a specific stage
+bash build/run_pipeline.sh --from-stage 4
+```
+
+### Step 5 — Start the servers
+
+```bash
+# 1. Embedding server (start FIRST)
+python3 serve/embed_server.py
+
+# 2. MCP server (for AI coding assistants)
+ARTIFACT_DIR=~/projects/workspaces/YOUR_ORG/artifacts python3 serve/mcp_server.py
+
+# 3. Chat UI (optional)
+cd serve && chainlit run demo_server_v6.py --port 8000
+```
+
+---
+
+## Folder structure
+
+```
+hyperretrieval/
+├── build/                          <- 14-stage pipeline
+│   ├── 00_export_git_history.py    <- Export git history -> git_history.json
+│   ├── 01_extract.py              <- Parse source (tree-sitter + ast, parallel)
+│   ├── 01b_detect_author_aliases.py <- Merge duplicate git identities
+│   ├── 02_build_graph.py          <- NetworkX graph + Leiden clustering
+│   ├── 03_embed.py                <- GPU-batch embed -> LanceDB
+│   ├── 04_summarize.py            <- LLM cluster summaries (resumable)
+│   ├── 05_package.py              <- Package artifacts
+│   ├── 06_build_cochange.py       <- Co-change index (streaming, O(1) memory)
+│   ├── 06b_build_cross_cochange.py <- Cross-repo co-change (+/-24h window)
+│   ├── 07_chunk_docs.py           <- Embed markdown docs
+│   ├── 08_build_ownership.py      <- Per-module git ownership
+│   ├── 09_build_granger.py        <- Granger causality (directional, with lag)
+│   ├── 09b_build_viz_data.py      <- Visualization data
+│   ├── 10_build_activity.py       <- Per-module activity metrics
+│   ├── 10_build_communities.py    <- Leiden on co-change graph
+│   └── run_pipeline.sh
+│
+├── serve/
+│   ├── retrieval_engine.py        <- Core: loads all indexes, all retrieval logic
+│   ├── embed_server.py            <- Shared embedding server (:8001)
+│   ├── mcp_server.py             <- MCP SSE server (:8002) — 12 tools
+│   └── pr_analyzer.py            <- Guardian Mode CLI for CI/CD
+│
+├── plugins/
+│   └── cursor/                    <- Cursor IDE marketplace plugin
+│       ├── manifest.json
+│       ├── server.py
+│       └── README.md
+│
+├── tools/
+│   └── viz/                       <- Codebase visualization (:8003)
+│       ├── index.html             <- D3: Services, Clusters, 2D Scatter views
+│       └── serve.py
+│
+├── tests/
+│   ├── test_01_artifacts.py       <- Verify build outputs
+│   ├── test_02_retrieval_logic.py <- Unit tests for retrieval
+│   ├── test_03_canary.py          <- Smoke test
+│   ├── test_04_retrieval_accuracy.py <- Known-answer benchmark
+│   ├── test_05_integration.py     <- End-to-end server test
+│   ├── test_06_auto_eval.py       <- LLM-as-judge quality eval
+│   ├── test_07_author_aliases.py  <- Author alias detection tests
+│   ├── bench_blast_radius_recall.py <- Blast radius v2 recall benchmark
+│   ├── chat_50_questions.json     <- 50-question eval set
+│   └── run_chat_eval.py           <- Automated eval runner
+│
+├── tools.py                       <- Tool implementations + AGENT_TOOLS schemas
+├── config.example.yaml            <- Template workspace config
+└── .mcp.json                      <- MCP server config for AI assistants
+```
+
+```
+workspaces/YOUR_ORG/               <- Org-specific data (not in git)
+├── config.yaml
+├── source/                        <- Your source repos
+├── artifacts/                     <- Indexes loaded at runtime
+│   ├── graph_with_summaries.json
+│   ├── vectors.lance/
+│   ├── cochange_index.json
+│   ├── cross_cochange_index.json
+│   ├── activity_index.json
+│   ├── granger_index.json
+│   └── ownership_index.json
+├── output/
+│   ├── body_store.json
+│   ├── call_graph.json
+│   └── author_aliases.yaml
+└── git_history.json
+```
+
+---
+
+## Guardian Mode — CI/CD integration
+
+Guardian analyzes PRs for completeness: blast radius, missing changes, risk score (0-100), and suggested reviewers.
+
+```bash
+# CLI usage
 git diff main...HEAD --name-only | python3 serve/pr_analyzer.py
-python3 serve/pr_analyzer.py --files src/Routes.hs src/Gateway.hs
-git diff main...HEAD --name-only | python3 serve/pr_analyzer.py --format json
-git diff main...HEAD --name-only | python3 serve/pr_analyzer.py --check security
+python3 serve/pr_analyzer.py --files src/Routes.hs src/Gateway.hs --format json
+
+# GitHub Action (zero-config)
+# Copy .github/workflows/guardian-lite.yml to any repo
+# Works on any language — needs only git history
+```
+
+### Zero-Config Guardian
+
+```bash
+# Initialize on any repo (no AST, no GPU, no config needed)
+python3 apps/cli/guardian_init.py --repo /path/to/repo
+
+# Runs with just git history — no embedding model required
+python3 apps/cli/pr_analyzer.py --mode guardian --files file1.py file2.py
 ```
 
 ---
 
-## Config reference
+## Codebase visualization
 
-`config.yaml` (copied from `config.example.yaml`) controls the build and serve layers.
+Interactive D3 visualization on port 8003 with three views:
 
-```yaml
-workspace: your-org
+- **Services** — force-directed graph, sized by symbol count, connected by import edges
+- **Clusters** — named clusters colored by service, connected by co-change edges
+- **2D Scatter** — every symbol projected via UMAP, colored by service or cluster
 
-artifacts_dir: /path/to/workspaces/your-org/artifacts
-output_dir:   /path/to/workspaces/your-org/output
-source_dir:   /path/to/workspaces/your-org/source
-git_history:  /path/to/workspaces/your-org/git_history.json
-model_dir:    /path/to/models/your-embed-model
+```bash
+# Build data files
+python3 build/09_build_viz_data.py
+python3 build/09b_build_scatter_data.py   # requires umap-learn
 
-llm_base_url: https://your-llm-endpoint
-llm_model:    your-model-name
-llm_api_key:  your-api-key   # also readable from LLM_API_KEY env var
-
-chainlit_port: 8000
-mcp_port:      8002
-embed_port:    8001
-
-# ── Service profiles ──────────────────────────────────────────────────────────
-# role:           orchestrator | connector | entry_point | persistence | worker
-# traffic_weight: 0.0–1.0 — relative production importance; biases retrieval
-# region:         which deployment region this service handles
-service_profiles:
-  payment-core:
-    role:           orchestrator
-    traffic_weight: 1.0
-    region:         global
-    description:    "Core transaction processing. Every payment passes through here."
-  gateway-connector:
-    role:           connector
-    traffic_weight: 0.85
-    region:         apac
-    description:    "Connector layer for payment gateways."
-
-# ── Keyword allowlist ─────────────────────────────────────────────────────────
-# Short domain terms that bypass the stopword/length filter in keyword search
-kw_allowlist:
-  - upi
-  - emi
-  - mandate
-  - 3ds
-
-# ── Architecture doc generation (stage 8) ────────────────────────────────────
-doc_generation:
-  enabled:                true
-  output_dir:             /path/to/workspaces/your-org/docs/generated
-  max_verify_iterations:  3
-  min_accuracy_threshold: 0.80
-  entry_point_patterns:   [WorkFlow, Flow, Handler, Router, Service, Manager]
-  skip_if_exists:         true
-  model:                  your-model-name
+# Serve
+VIZ_PORT=8003 python3 tools/viz/serve.py
 ```
+
+---
+
+## Architecture
+
+```
+embed_server.py (:8001)
+  One process loads the embedding model. All others connect via EMBED_SERVER_URL.
+  Supports: local GPU, OpenAI, Cohere, Voyage, Jina, Ollama.
+
+retrieval_engine.py (imported by all entry points)
+  initialize(artifact_dir) loads: graph, vectors, bodies, call graph,
+  co-change, cross-repo co-change, activity, Granger, ownership, docs.
+
+  Core capabilities:
+    unified_search()     — 3-signal RRF (vector + BM25 + co-change expansion)
+    get_blast_radius()   — v2 activity-weighted tiered impact analysis
+    predict_missing()    — changeset completeness prediction
+
+Entry points:
+  mcp_server.py (:8002)         12 MCP tools over SSE
+  demo_server_v6.py (:8000)     Chainlit chat UI
+  pr_analyzer.py                CLI for CI/CD
+  plugins/cursor/server.py      Cursor IDE plugin
+```
+
+**Two graphs (G and MG):** G is symbol-level (function nodes, call edges). MG is module-level (import edges). Blast radius and module search use MG; function lookup and call tracing use G.
+
+**Stratified vector search:** Caps results per service before ranking, preventing large services from dominating results.
+
+**Service importance weighting:** `traffic_weight` in config.yaml biases retrieval toward production-critical services.
+
+---
+
+## Design decisions
+
+### Why temporal signals over static analysis
+Static import graphs tell you what *could* break — but only 14.9% of import neighbors actually co-change. Activity-weighted reranking from git history tells you what *actually* breaks together. Benchmark: recall@10 from 0.11 to 0.47.
+
+### Why BM25 + RRF alongside vector search
+Vector search finds "what handles retry logic?" but misses exact names like `TxnSplitDetail`. BM25 scores rare identifiers via IDF weighting. RRF merges both with `1/(60 + rank)` — no hyperparameters.
+
+### Why Leiden over Louvain
+Louvain can produce disconnected communities. Leiden guarantees internal connectivity, runs faster, and is a drop-in replacement.
+
+### Why tree-sitter over regex
+Regex body extraction cuts off mid-function or bleeds into the next definition. Tree-sitter gives exact `start_byte:end_byte` from the AST.
+
+### Why cross-repo co-change
+Services communicate over HTTP — no static analysis traces that boundary. Co-change captures empirical coupling from git history regardless of communication mechanism.
+
+### Why the body store is separate
+The 250MB symbol graph stays resident. The 50MB+ body store loads on demand — only `get_function_body` needs it.
 
 ---
 
 ## Best practices
 
-### Build pipeline
-
-- Run stage 3 (embed) with no other embedding workloads active — it is the most memory-intensive stage
-- Stage 4 (summarize) checkpoints after every cluster — safe to interrupt and resume
-- Always run stage 5 after stage 4 — it copies the final graph to `artifacts/` where servers load it from
-- Stage 6 (co-change) streams git history at commit level — O(1) memory, safe on arbitrarily large history files
-- Validate your git history export before running stage 6: check the last few bytes for truncation
-
-### Running servers
-
-- Start the embedding server before all others — if other servers start first they attempt in-process model loading
-- Set `EMBED_SERVER_URL` in every server process that uses embeddings
-- Run long-lived server processes with proper session isolation (`start_new_session=True` in Python subprocess, or a process manager like systemd/supervisor in production)
-- In production, put servers behind a reverse proxy (nginx, Caddy) — do not expose ports directly
-
-### Querying and retrieval
-
-- Start exploration with `search_modules` — it returns namespaces, which are then browsable with `get_module`. This is faster and more precise than open-ended `search_symbols`.
-- Short domain-specific terms (acronyms, payment codes, protocol names) may be filtered by length. Add them to `_KW_ALLOWLIST` in `retrieval_engine.py`.
-- Batch independent tool calls in a single LLM turn — sequential single-call round-trips are slower and use more tokens
-- `get_context` is a large fallback — only invoke it if targeted searches have genuinely failed
-- If search results are consistently wrong for a particular term, check whether it is being split or normalised unexpectedly before the keyword search
-
-### Workspace hygiene
-
-- Keep platform code (`hyperretrieval/`) and org data (`workspaces/YOUR_ORG/`) in separate git repos — the data is not part of the product
-- Rebuild the vector index (`03_embed.py`) whenever you change the embedding provider or model
-- Re-run the full pipeline periodically as the codebase evolves — the co-change index especially benefits from fresh commit history
-- Store API keys in environment variables or a secrets manager, never in `config.yaml`
-
----
-
-## Design decisions and learnings
-
-Every non-obvious decision in this system has a reason. This section explains what was built, what was tried first, what failed, and why the current approach is the right one. It is written to help anyone picking up this codebase understand not just *what* the system does but *why* it does it that way.
-
----
-
-### Why the visualisation moved from WebGL mindmap to D3 (tools/viz)
-
-The first visualisation was a single-file WebGL renderer (`generate_mindmap.py`) that generated a self-contained HTML file with Three.js force-directed graph. It worked for small codebases but had three problems at scale:
-
-1. **Generated-file anti-pattern.** The script read the full graph JSON, templated it into an HTML string, and wrote it to disk. Any change to the data required regenerating the file. There was no separation between data pipeline and frontend.
-2. **WebGL at 100k+ nodes.** Three.js force simulation on 114k nodes consumed ~4 GB RAM in the browser tab and became unresponsive. The viz needed to operate at cluster and service granularity, not symbol granularity.
-3. **Single view.** A force graph of raw symbols is visually noisy and hard to navigate. Engineers need to zoom in from service → cluster → module, not stare at a hairball.
-
-The replacement (`tools/viz/`) separates data building (two offline scripts) from serving (a static HTTP server). The D3 frontend has three distinct views at different granularities, edge filtering to prevent hairballs, and a separate UMAP scatter for the full 114k symbol space rendered efficiently on canvas.
-
----
-
-### Why tree-sitter over regex for parsing (Stage 1)
-
-**The problem with regex:** Haskell and Rust use syntactic structures — indentation blocks, nested braces, `where` clauses — that are impossible to reliably delimit with regular expressions. The original regex-based body extraction either captured too little (cut off mid-function) or too much (bled into the next definition). An extracted body that starts correctly but ends at the wrong line confuses the embedding model and produces misleading similarity scores.
-
-**What tree-sitter gives you:** Tree-sitter builds a full Abstract Syntax Tree (AST) using byte offsets. Every function node has a precise `start_byte` and `end_byte` — the body is exactly `src[start_byte:end_byte]`, no heuristic needed.
-
-**The analogy:** Regex parsing is like estimating where a room ends by counting steps from the door. Tree-sitter is GPS — it gives you the exact boundary coordinates.
-
-**The fallback:** Tree-sitter parsers are installed per-language (`tree-sitter-haskell`, `tree-sitter-rust`, `tree-sitter-groovy`). If a parser is unavailable, each extractor falls back to the regex approach automatically — so the system degrades gracefully rather than failing hard.
-
----
-
-### Why Leiden over Louvain for clustering (Stage 2)
-
-**The defect in Louvain:** Louvain has a mathematically proven flaw — it can produce *disconnected* communities, where nodes in the same cluster have no path between them in the graph. This means two modules with no shared imports or co-change history could end up in the same cluster, producing nonsensical summaries.
-
-**Leiden fixes this provably.** The Leiden algorithm guarantees that every cluster is internally connected. It runs in O(n log n) — faster than Louvain on large graphs — and uses the same API, making it a drop-in replacement.
-
-**Why it matters for us:** Cluster summaries are the high-level map that retrieval uses to route queries. A disconnected cluster produces a summary that mixes unrelated modules. The LLM summarizer then writes a confused description that sends queries to the wrong part of the codebase.
-
----
-
-### Why BM25 + Reciprocal Rank Fusion alongside vector search (Serve layer)
-
-**The exact-name problem:** Dense vector embeddings excel at semantic similarity — "what handles retry logic?" will find the right function even if it's named `executeWithBackoff`. But if you search for `TxnSplitDetail` (an exact type name), the embedding model may rank semantically-similar-but-wrong types above the exact match, because embeddings encode meaning, not spelling.
-
-**BM25** (a classical information retrieval algorithm) uses IDF weighting — rare tokens score very high. `TxnSplitDetail` appears in few documents, so BM25 ranks the exact match first.
-
-**Reciprocal Rank Fusion (RRF):** Instead of trying to combine two scored lists by tuning weights (fragile, hyperparameter-sensitive), RRF converts each list to rank positions and scores each document as `Σ 1/(60 + rank_i)`. The constant 60 is empirically validated across many retrieval benchmarks. No hyperparameters, no tuning — just merge and rank.
-
-**The analogy:** Vector search is like a librarian who understands what you mean. BM25 is a librarian who reads the exact words on the spine. RRF is asking both and trusting whichever one agrees most.
-
----
-
-### Why service importance weighting
-
-**The problem without it:** In a multi-service codebase, the largest service (by symbol count) tends to dominate retrieval results — not because it's the right answer, but because it has the most vectors. A global expansion connector with 8,000 nodes and zero production traffic today would outscore a core payment processor with 2,000 nodes, simply because the search space is larger.
-
-**The fix:** Each service gets a `traffic_weight` in `config.yaml` (0.0 to 1.0). This scalar is multiplied into retrieval scores before final ranking. A service marked `traffic_weight: 0.3` contributes proportionally less to results for queries where multiple services are candidates.
-
-**The learning:** This came from observing that a global expansion connector with ~8K symbols and good graph centrality kept appearing in results for region-specific queries — despite having zero production traffic in that region. It was the right shape but the wrong service. Setting `traffic_weight: 0.3` for that service eliminated the noise.
-
----
-
-### Why adaptive sampling in cluster summarisation (Stage 4)
-
-**The problem with fixed sampling:** Stage 4 sends a sample of a cluster's nodes to an LLM for summarisation. With a fixed limit of 80 nodes and a cluster containing 820 modules, the sample was chosen by shuffling all modules randomly and taking one node from each until 80 were collected.
-
-**What happened in practice:** The lottery had 820 entrants. There were 30+ individual gateway integration modules (each ~200–350 nodes) and 4 core transaction orchestration modules. Statistically, the sample contained ~4× more gateway integration than core business logic. The resulting LLM summary said the cluster was "a multi-provider payment orchestrator integrating 15+ gateways" — technically accurate but missing the mandate execution, retry logic, txn state machine, and split payment flows entirely.
-
-**The fix has three parts:**
-1. **Adaptive sample size:** For a cluster with 820 modules, sample `min(300, 820 // 3) = 273` nodes, not 80.
-2. **Priority ordering:** Modules whose names contain `Product`, `OLTP`, `Flow`, `Handler`, `Transaction`, `Mandate`, `Payment`, `Routing` are sampled first, at 2× density.
-3. **Boilerplate suppression:** Modules named `*.Lenses`, `Config.Constants`, `*.Shims`, `*.Generated` are sampled last, at ¼ density. These are auto-generated or mechanical files — no business logic lives there.
-
-**The analogy:** If you need to understand what a hospital does, you interview doctors and nurses first. The lottery approach would give an equal chance to the boilerplate administrative forms as to the surgical team.
-
----
-
-### Why parallel extraction (Stage 1)
-
-Services in a multi-service codebase are completely independent data sources — no service's symbols depend on another service's symbols being parsed first. The original implementation processed them sequentially (one service, then the next), leaving N-1 cores idle.
-
-Using `multiprocessing.Pool` with one worker per service means all services parse concurrently. On a 24-core machine with 13 services, all 13 run simultaneously. Wall time drops from ~hours to ~minutes.
-
-**Important constraint:** The merge (combining all symbol lists, deduplication, caller index, writing outputs) still happens in the main process after all workers complete. This is intentional — merging requires a global view that no individual worker has.
-
----
-
-### Why the body store is a separate file
-
-When the serve layer starts, it loads the symbol graph (nodes + edges) into memory — this enables graph traversal, vector search, and keyword search. The graph JSON for 114K symbols is ~250MB. That's acceptable to keep resident.
-
-The body store (full source text of every function) adds another ~50MB+ and is never needed unless a user explicitly requests `get_function_body`. Loading it at startup wastes memory and slows startup for a capability that is used in a minority of queries.
-
-Solution: body store is loaded separately and accessed by key. Tools that don't need source text pay zero cost. Tools that do (`get_function_body`, `get_context`) read from it on demand.
-
----
-
-### Why co-change beats call graph for cross-service coupling
-
-For calls *within* a service (in-process function calls), the static call graph is authoritative. But services in a real system communicate over HTTP — and no static analysis can trace an HTTP boundary without knowing the runtime URL and routing table.
-
-Co-change analysis sidesteps this entirely. If module A in service X and module B in service Y always change in the same commit, they are coupled — regardless of *how* they communicate. The coupling is observable in git history without understanding the runtime topology.
-
-This is particularly valuable for blast-radius analysis: "if I change this module, what else do I need to test?" The answer from co-change is empirical (what *has* broken together historically), not theoretical (what *could* break given the type system).
-
----
-
-### Enterprise calibration vs. single-repo findings
-
-Several published retrieval benchmarks recommend capping search results at K=5–8, citing precision degradation beyond that point. Those benchmarks were conducted on single repositories with < 50K symbols.
-
-In a multi-service enterprise codebase with 12+ services and 100K+ symbols:
-- Relevant code may genuinely span 3–4 services
-- A cap of 5 often excludes the right answer entirely
-- The signal-to-noise problem is about *service bias*, not *total count*
-
-The right fix for enterprise is **stratification** (cap per service, not per query) and **density thresholds** (drop results that score below 60% of the top result) — not reducing the total cap. This was an explicit decision to reject the benchmark recommendation as inapplicable to the target environment.
-
----
-
-## Architecture deep-dive
-
-```
-embed_server.py (:8001)
-  One process loads the embedding model (local GPU or cloud API).
-  Serves POST /embed → {embeddings: [[float, ...]]}
-  GET /health → {provider, model, dim, device, loaded}
-  All other processes connect via EMBED_SERVER_URL — zero model duplication.
-
-retrieval_engine.py  (imported by every entry point)
-  initialize(artifact_dir) loads all indexes into memory:
-    graph_with_summaries.json → NetworkX symbol graph G + module graph MG
-    vectors.lance             → LanceDB vector table
-    body_store.json           → fn_id → source body
-    call_graph.json           → fn_id → {callees, callers}
-    cochange_index.json       → module → [(module, weight), ...]
-    log_patterns.json         → fn_id → [observable log strings]
-    docs.lance                → LanceDB documentation chunks
-
-  Exposes:
-    AGENT_TOOLS     — OpenAI function-calling schemas for the LLM
-    TOOL_DISPATCH   — name → callable, used by every agent implementation
-
-Entry points (all import retrieval_engine, none duplicate logic):
-
-  apps/chat/demo_server_v6.py (:8000)    Chainlit chat UI
-    ReAct loop renders tool calls as expandable steps.
-    Streams the final answer token by token.
-
-  serve/mcp_server.py (:8002/sse)        MCP server
-    Wraps TOOL_DISPATCH as MCP tools over SSE transport.
-    Compatible with any MCP client.
-
-  apps/cli/pr_analyzer.py                CLI
-    resolve files → blast radius → optional LLM explanation.
-    Exits non-zero for CI gates.
-
-  your_app.py                  Anything you build
-    Import retrieval_engine + tools, call RE.initialize(), use tools.TOOL_DISPATCH.
-```
-
-**Why two graphs (G and MG)?**
-Import edges connect module *names*, not function IDs. G is a symbol-level graph — it holds function nodes and call/instance edges. MG is a module-level graph built at startup from raw import edges. Blast-radius traversal and module search use MG; function body lookup and call tracing use G and the body/call stores.
-
-**Why stratified vector search?**
-Without stratification, nearest-neighbour search returns results biased toward the largest service (most symbols). Stratification caps results per service before final ranking, ensuring all services get representation regardless of size.
-
-**Why BM25 + RRF alongside vector search?**
-Dense vector search excels at semantic similarity but can miss exact symbol name matches (e.g. `TxnSplitDetail`, `createPaymentLink`). BM25 scores rare identifiers highly using IDF weighting. Reciprocal Rank Fusion (RRF, k=60) merges both ranked lists without hand-tuned weights — each document scores `Σ 1/(60 + rank_i)` across retrieval methods. The combined result handles both "what handles retry logic?" (semantic) and "find TxnSplitDetail" (exact) correctly.
-
-**Service importance weighting**
-Each service in `config.yaml` has a `traffic_weight` (0.0–1.0) reflecting its production significance. This biases retrieval toward high-traffic services (e.g. the core transaction orchestrator) over low-traffic ones (e.g. a global expansion connector with zero production traffic today), preventing large-but-irrelevant services from monopolising results.
+- Start the embedding server before all other servers
+- Start exploration with `search_modules`, not `search_symbols`
+- Add short domain terms (acronyms, protocol names) to `kw_allowlist` in config
+- Keep platform code and org data in separate repos
+- Rebuild indexes periodically as the codebase evolves — co-change benefits most from fresh history
+- Store API keys in environment variables, never in config.yaml
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `name '_encode_queries_batch' is not defined` | Function deleted by mistake | Restore it — it is called by `_encode_query` and `stratified_vector_search` |
-| Embed server reports `device=cpu` when GPU is available | GPU driver not visible to the process | Check `nvidia-smi` and CUDA driver installation; on WSL2 run `wsl --shutdown` and restart |
-| Chainlit shows default name/theme instead of custom | Wrong working directory at launch | Run chainlit from `apps/chat/` — `.chainlit/` config and `public/` must be accessible from CWD |
-| LanceDB write fails silently | Writing to a filesystem that does not support mmap | Write to a native Linux ext4 path; on WSL2 avoid `/mnt/` paths |
-| Semantic search misses obvious results | Short terms filtered by length | Add short domain terms to `_KW_ALLOWLIST` in `retrieval_engine.py` |
-| Co-change builder runs out of memory | Loading full repository objects into memory | Use `06_build_cochange.py` which streams at commit level, not repo level |
-| Server process exits when terminal closes | Process attached to a PTY | Use a process manager, `nohup`, or `subprocess.Popen(start_new_session=True)` |
-| vectors.lance is empty after stage 3 | Stage 3 wrote to a temp path and was not copied | Check `ARTIFACT_DIR` env var; ensure stage 5 ran after stage 3 |
-| MCP tools not showing in Claude Code | Wrong transport or URL | Use `type: sse` in `.mcp.json`; confirm port is correct; check server log |
+| Symptom | Fix |
+|---------|-----|
+| Embed server reports `device=cpu` | Check `nvidia-smi` and CUDA installation |
+| Semantic search misses obvious results | Add short domain terms to `kw_allowlist` |
+| Co-change builder OOM | Use `06_build_cochange.py` (streams at commit level) |
+| MCP tools not showing in Claude Code | Use `type: sse` in `.mcp.json`; check port |
+| LanceDB write fails | Write to native ext4, not `/mnt/` on WSL2 |
+| Server dies when terminal closes | Use `subprocess.Popen(start_new_session=True)` or systemd |
+| vectors.lance empty after stage 3 | Ensure stage 5 ran after stage 3 |
+
+---
+
+## Research
+
+The temporal signal research behind blast radius v2 is documented in:
+
+- `~/lab/experiments/exp_001_crosscochange_validation/` — cross-repo co-change signal validation
+- `~/lab/experiments/exp_003_change_prediction/` — change prediction model (1.4M labeled pairs)
+- `~/lab/experiments/exp_004_*/` — structural feature ceiling analysis
+- `~/lab/experiments/exp_005_*/` — cross-ecosystem generalizability (Flask + Juspay)
+- `~/lab/OPEN_QUESTIONS.md` — active research threads
+- `~/lab/NOTEBOOK.md` — lab notebook with session-by-session findings
+
+Research conducted by [Carlsbert](https://carlsbert.tunnelthemvp.in/journal/) — an autonomous Claude agent running as a digital co-founder.
+
+---
+
+*Built by [Amit Shukla](https://github.com/Amitshukla2308) with research by Carlsbert.*
