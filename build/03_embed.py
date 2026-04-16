@@ -35,6 +35,9 @@ LANCE_DEST = ARTIFACT_DIR / "vectors.lance"
 EMBED_NPY  = OUT_DIR / "embeddings.npy"
 EMBED_IDS  = OUT_DIR / "embed_ids.json"
 
+QUANT_BITS = int(os.environ.get("QUANT_BITS", "4"))  # 0 = skip, 2/3/4 supported
+QUANT_OUT  = ARTIFACT_DIR / "vectors_quantized.npz"
+
 INSTRUCTION = (
     "Instruct: Represent this code module for finding semantically similar "
     "components across microservices. "
@@ -148,6 +151,91 @@ def write_lancedb(nodes, raw_texts, embeddings):
     return table
 
 
+def quantize_vectors(embeddings, device="cpu"):
+    """Apply TurboQuant compression to embeddings. Saves quantized index to ARTIFACT_DIR.
+
+    Requires turboquant-pytorch: git clone https://github.com/tonbistudio/turboquant-pytorch /tmp/turboquant-pytorch
+    Then: ln -s /tmp/turboquant-pytorch /tmp/turboquant
+    """
+    import torch
+    import numpy as np
+
+    if QUANT_BITS == 0:
+        print("\n  QUANT_BITS=0, skipping quantization")
+        return
+
+    try:
+        import sys
+        if '/tmp' not in sys.path:
+            sys.path.insert(0, '/tmp')
+        from turboquant import TurboQuantMSE
+    except ImportError:
+        print("\n  WARNING: turboquant not found, skipping quantization")
+        print("  Install: git clone https://github.com/tonbistudio/turboquant-pytorch /tmp/turboquant-pytorch")
+        print("           ln -s /tmp/turboquant-pytorch /tmp/turboquant")
+        return
+
+    n, d = embeddings.shape
+    print(f"\n{'='*60}")
+    print(f"TurboQuant compression @ {QUANT_BITS}-bit ({n:,} vectors, {d}d)")
+    print(f"{'='*60}")
+
+    # Normalize (TurboQuant assumes unit vectors)
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    vectors_unit = embeddings / norms
+
+    quant_device = "cuda" if device == "cuda" and torch.cuda.is_available() else "cpu"
+    vectors_torch = torch.from_numpy(vectors_unit).to(quant_device)
+
+    quantizer = TurboQuantMSE(d, QUANT_BITS, seed=42, device=quant_device)
+
+    # Quantize in chunks to avoid GPU OOM on large datasets
+    CHUNK = 20000
+    x_hat_chunks = []
+    indices_chunks = []
+    import time
+    t0 = time.time()
+    for cs in range(0, n, CHUNK):
+        ce = min(cs + CHUNK, n)
+        with torch.no_grad():
+            chunk_hat, chunk_idx = quantizer(vectors_torch[cs:ce])
+        x_hat_chunks.append(chunk_hat.cpu())
+        indices_chunks.append(chunk_idx.cpu())
+        if quant_device == "cuda":
+            torch.cuda.empty_cache()
+    x_hat = torch.cat(x_hat_chunks, dim=0)
+    indices = torch.cat(indices_chunks, dim=0)
+    qt = time.time() - t0
+
+    # Metrics
+    cos_sims = torch.nn.functional.cosine_similarity(
+        torch.from_numpy(vectors_unit), x_hat, dim=1
+    )
+    fp32_mb = n * d * 4 / 1e6
+    quant_mb = (n * d * QUANT_BITS + d * d * 32 + (2**QUANT_BITS) * d * 32) / 8 / 1e6
+
+    print(f"  Quantize time: {qt:.1f}s ({n/qt:.0f} vec/s)")
+    print(f"  Cosine fidelity: mean={cos_sims.mean():.4f}, min={cos_sims.min():.4f}")
+    print(f"  fp32: {fp32_mb:.0f} MB → TurboQuant: {quant_mb:.0f} MB ({fp32_mb/quant_mb:.1f}x)")
+
+    # Save quantized data (Pi=rotation, centroids/boundaries=scalar codebook)
+    np.savez_compressed(
+        str(QUANT_OUT),
+        indices=indices.numpy().astype(np.uint8),
+        Pi=quantizer.Pi.cpu().numpy(),
+        centroids=quantizer.centroids.cpu().numpy(),
+        boundaries=quantizer.boundaries.cpu().numpy(),
+        norms=norms.squeeze(),
+        bits=QUANT_BITS,
+        dim=d,
+        n_vectors=n,
+    )
+    out_mb = QUANT_OUT.stat().st_size / 1e6
+    print(f"  Saved: {QUANT_OUT} ({out_mb:.0f} MB)")
+    print(f"  Compression: {fp32_mb/out_mb:.1f}x (on-disk)")
+
+
 def main():
     import torch
     import numpy as np
@@ -190,6 +278,9 @@ def main():
 
     print(f"\nWrote {len(nodes):,} vectors -> {LANCE_DEST}")
     print(f"  Vector dim : {embeddings.shape[1]}")
+
+    # ── TurboQuant compression ───────────────────────────────────────────────
+    quantize_vectors(embeddings, device=device)
 
     # ── Persist embed_text back to graph ─────────────────────────────────────
     # Phantoms get empty string via .get() default
