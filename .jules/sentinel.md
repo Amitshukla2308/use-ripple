@@ -1,0 +1,4 @@
+## 2024-05-18 - [CLI Commands Shell Injection]
+**Vulnerability:** Subprocess calls in `code_commands.py`, `system_commands.py`, and `git_commands.py` used `shell=True` with unsanitized user inputs, exposing the application to command injection attacks.
+**Learning:** Using string interpolation with `shell=True` allows malicious inputs (like `; rm -rf /`) to break out of the intended command context and execute arbitrary code on the host system. Tools like `which` when run via `subprocess.run(shell=True)` are also unsafe and unnecessary given standard library alternatives.
+**Prevention:** Always use `shell=False` when calling `subprocess.run()`. Construct command arguments as lists by parsing inputs securely with `shlex.split()`. Use `shlex.quote()` when inserting dynamic strings into arguments parsed by `shlex`. Prefer standard library functions like `shutil.which()` instead of shelling out to `which`.

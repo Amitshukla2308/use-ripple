@@ -76,10 +76,11 @@ def cmd_doctor(args: str, session, engine) -> str:
     except Exception as exc:
         checks.append(f"  Retrieval     : ✗ {exc}")
 
+    import shutil
+
     # Tools
     for tool in ("rg", "git", "pytest", "bun"):
-        found = subprocess.run(f"which {tool}", shell=True,
-                               capture_output=True).returncode == 0
+        found = shutil.which(tool) is not None
         checks.append(f"  {tool:<12}  : {'✓' if found else '○ optional'}")
 
     # ARTIFACT_DIR
@@ -190,10 +191,14 @@ def cmd_mcp(args: str, session, engine) -> str:
                "MCP server may not have started. Check ~/mcp_server.log"
 
     elif sub == "stop":
-        result = subprocess.run("fuser -k 8002/tcp", shell=True,
-                                capture_output=True, text=True)
-        return "MCP server stopped." if result.returncode == 0 else \
-               "Could not stop MCP server (may not be running)."
+        import shutil
+        if shutil.which("fuser"):
+            result = subprocess.run(["fuser", "-k", "8002/tcp"], shell=False,
+                                    capture_output=True, text=True)
+            return "MCP server stopped." if result.returncode == 0 else \
+                   "Could not stop MCP server (may not be running)."
+        else:
+            return "Could not stop MCP server: 'fuser' command not found."
 
     elif sub == "tools":
         from tools import build_tool_registry  # type: ignore

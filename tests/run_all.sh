@@ -21,7 +21,7 @@
 
 set -eo pipefail
 
-PY="/home/beast/miniconda3/bin/python3"
+PY="$(command -v python3 || echo "python3")"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PIPELINE_DIR="$(dirname "$SCRIPT_DIR")"
 

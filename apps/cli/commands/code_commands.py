@@ -114,12 +114,17 @@ def cmd_test(args: str, session, engine) -> str:
     /test tests/test_foo.py → run specific test file
     /test -k payment        → pass args to test runner
     """
+    import shlex
     # Detect test runner
     cwd = session.cwd
+
+    # We parse args manually to avoid shell=True
+    arg_list = shlex.split(args) if args else []
+
     runners = [
-        (f"pytest {args} -v", "pytest.ini", "setup.cfg", "pyproject.toml"),
-        (f"python3 -m pytest {args} -v", None),
-        (f"python3 run_tests.py {args}", "run_tests.py"),
+        (["pytest"] + arg_list + ["-v"], "pytest.ini", "setup.cfg", "pyproject.toml"),
+        (["python3", "-m", "pytest"] + arg_list + ["-v"], None),
+        (["python3", "run_tests.py"] + arg_list, "run_tests.py"),
     ]
 
     for runner_cmd, *markers in runners:
@@ -127,13 +132,15 @@ def cmd_test(args: str, session, engine) -> str:
             os.path.exists(os.path.join(cwd, m)) for m in markers if m
         ):
             result = subprocess.run(
-                runner_cmd, shell=True, capture_output=True, text=True,
+                runner_cmd, shell=False, capture_output=True, text=True,
                 cwd=cwd, timeout=300,
             )
             out = (result.stdout + result.stderr).strip()
             if len(out) > 6000:
                 out = out[:3000] + f"\n... [truncated] ...\n" + out[-2500:]
-            return f"$ {runner_cmd}\n\n{out}"
+
+            cmd_str = shlex.join(runner_cmd)
+            return f"$ {cmd_str}\n\n{out}"
 
     return "No test runner found. Run: /test <pytest-args> or specify a test file."
 
@@ -207,16 +214,26 @@ def cmd_implement(args: str, session, engine) -> str:
 
 def cmd_lint(args: str, session, engine) -> str:
     """Run linter on a file or the whole project."""
-    target = args or "."
+    import shlex
+    import shutil
+
+    # Safely parse user input target
+    # If no args given, use "." as the target
+    target_args = shlex.split(args) if args else ["."]
     cwd    = session.cwd
 
-    for linter in (f"ruff check {target}", f"flake8 {target}",
-                   f"pylint {target}", f"biome check {target}"):
-        tool = linter.split()[0]
-        if subprocess.run(f"which {tool}", shell=True,
-                          capture_output=True).returncode == 0:
+    linters = [
+        (["ruff", "check"] + target_args),
+        (["flake8"] + target_args),
+        (["pylint"] + target_args),
+        (["biome", "check"] + target_args)
+    ]
+
+    for linter in linters:
+        tool = linter[0]
+        if shutil.which(tool):
             result = subprocess.run(
-                linter, shell=True, capture_output=True, text=True, cwd=cwd)
+                linter, shell=False, capture_output=True, text=True, cwd=cwd)
             return (result.stdout + result.stderr).strip() or "No issues found."
 
     return "No linter found. Install ruff: pip install ruff"

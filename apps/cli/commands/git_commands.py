@@ -10,8 +10,11 @@ import sys
 
 
 def _git(args: str, cwd: str = None) -> str:
+    import shlex
+    # Construct arguments securely without shell=True
+    arg_list = ["git"] + shlex.split(args)
     result = subprocess.run(
-        f"git {args}", shell=True, capture_output=True, text=True,
+        arg_list, shell=False, capture_output=True, text=True,
         cwd=cwd or ".",
     )
     return (result.stdout + result.stderr).strip()
@@ -47,7 +50,10 @@ def cmd_commit(args: str, session, engine) -> str:
         message = message.strip().strip('"').strip("'")
 
     _git("add -A", cwd)
-    result = _git(f'commit -m {message!r}', cwd)
+    # _git expects a string that it can split via shlex
+    import shlex
+    quoted_message = shlex.quote(message)
+    result = _git(f'commit -m {quoted_message}', cwd)
     return result
 
 
