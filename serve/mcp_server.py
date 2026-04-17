@@ -448,8 +448,28 @@ def check_my_changes(changed_files: list[str]) -> str:
         print(f"[check_my_changes] guard skipped: {_e!r}")
         guard_findings, guard_summary = [], {"count": 0, "critical": 0, "warning": 0, "patterns": []}
 
-    # Determine verdict (Guard CRITICAL escalates to FAIL; WARNING nudges toward WARN)
-    if guard_summary.get("critical", 0) > 0:
+    # Provenance: check if any changed lines are AI-generated (Git AI / Agent Blame / Tabnine)
+    try:
+        from serve.provenance_reader import summarize as _prov_summarize
+        prov_summary = _prov_summarize(changed_files)
+    except Exception as _e:
+        print(f"[check_my_changes] provenance skipped: {_e!r}")
+        prov_summary = {"total_ai_lines": 0, "files_with_ai": 0, "by_file": {}}
+
+    # Guard findings on AI-touched files escalate harder — AI code without verification is riskier
+    ai_guard_critical_bonus = 0
+    if prov_summary["total_ai_lines"] > 0 and guard_findings:
+        ai_files = set(prov_summary["by_file"].keys())
+        ai_guard_critical_bonus = sum(
+            1 for f in guard_findings
+            if f.get("file") in ai_files or any(af.endswith(f.get("file", "")) for af in ai_files)
+        )
+
+    # Determine verdict (Guard CRITICAL escalates to FAIL; WARNING nudges toward WARN;
+    # Guard finding on AI-touched file forces FAIL — unverified AI code is higher-risk)
+    if ai_guard_critical_bonus > 0:
+        status, reason = "FAIL", f"Guard finding on {ai_guard_critical_bonus} AI-generated file(s) — AI code + pattern violation is highest-risk"
+    elif guard_summary.get("critical", 0) > 0:
         status, reason = "FAIL", f"Guard: {guard_summary['critical']} CRITICAL finding(s) — {', '.join(guard_summary['patterns'][:3])}"
     elif coverage < 0.5 and len(predictions) >= 3:
         status, reason = "FAIL", f"PR completeness {coverage:.0%} with {len(predictions)} likely-missing files"
@@ -495,6 +515,12 @@ def check_my_changes(changed_files: list[str]) -> str:
             sev = f.get("severity", "WARNING")
             emoji = "🔴" if sev.upper() == "CRITICAL" else "🟡"
             lines.append(f"  {emoji} **{f.get('pattern', '?')}** `{f.get('file', '?')}:{f.get('line', 0)}` — {f.get('message', '')}")
+
+    if prov_summary["total_ai_lines"] > 0:
+        lines.append(f"\n### AI Provenance")
+        lines.append(f"  - **{prov_summary['total_ai_lines']}** AI-generated line(s) across **{prov_summary['files_with_ai']}** file(s)")
+        if ai_guard_critical_bonus > 0:
+            lines.append(f"  - ⚠️ **{ai_guard_critical_bonus}** Guard finding(s) intersect AI-generated code — manual review required")
 
     # Suggested reviewers
     rev_data = RE.suggest_reviewers(changed_mods, top_k=3)
