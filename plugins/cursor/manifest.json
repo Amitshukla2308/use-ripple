@@ -1,20 +1,20 @@
 {
-  "name": "hyperretrieval",
-  "displayName": "HyperRetrieval — Code Impact Intelligence",
+  "name": "ripple",
+  "displayName": "Ripple — Code Impact Intelligence",
   "version": "0.1.0",
   "description": "Blast radius analysis, missing change prediction, and reviewer suggestions powered by git history co-change patterns and Granger causality. Zero config — works on any repo.",
-  "author": "HyperRetrieval",
+  "author": "Ripple",
   "license": "MIT",
-  "homepage": "https://github.com/amitshukla-stack/hyper-retrieval",
+  "homepage": "https://github.com/amitshukla-stack/ripple",
   "categories": ["Code Analysis", "Developer Tools", "Code Review"],
   "keywords": ["blast-radius", "co-change", "code-review", "impact-analysis", "pr-review"],
 
   "mcpServers": {
-    "hyperretrieval": {
+    "ripple": {
       "command": "python3",
       "args": ["${pluginDir}/server.py"],
       "env": {
-        "HR_ARTIFACT_DIR": "${workspaceDir}/.hyperretrieval/artifacts"
+        "HR_ARTIFACT_DIR": "${workspaceDir}/.ripple/artifacts"
       }
     }
   },

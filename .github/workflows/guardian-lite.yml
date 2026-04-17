@@ -42,7 +42,7 @@ permissions:
 
 env:
   HYPERRETRIEVAL_VERSION: 'main'
-  ARTIFACT_DIR: '.hyperretrieval/artifacts'
+  ARTIFACT_DIR: '.ripple/artifacts'
   PYTHON_VERSION: '3.12'
 
 jobs:
@@ -76,9 +76,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            .hyperretrieval/artifacts/cochange_index.json
-            .hyperretrieval/artifacts/ownership_index.json
-            .hyperretrieval/git_history.json
+            .ripple/artifacts/cochange_index.json
+            .ripple/artifacts/ownership_index.json
+            .ripple/git_history.json
           key: guardian-indexes-${{ steps.history-hash.outputs.hash }}
           restore-keys: |
             guardian-indexes-
@@ -94,19 +94,19 @@ jobs:
         if: steps.cache-indexes.outputs.cache-hit != 'true' || github.event.inputs.force_rebuild == 'true' || github.event_name == 'schedule'
         run: pip install networkx pyyaml
 
-      - name: Checkout HyperRetrieval
+      - name: Checkout Ripple
         if: steps.cache-indexes.outputs.cache-hit != 'true' || github.event.inputs.force_rebuild == 'true' || github.event_name == 'schedule'
         uses: actions/checkout@v4
         with:
-          repository: amitshukla-stack/hyper-retrieval
+          repository: amitshukla-stack/ripple
           ref: ${{ env.HYPERRETRIEVAL_VERSION }}
-          path: .hyperretrieval-src
+          path: .ripple-src
 
       - name: Build Guardian indexes
         if: steps.cache-indexes.outputs.cache-hit != 'true' || github.event.inputs.force_rebuild == 'true' || github.event_name == 'schedule'
         run: |
           echo "::group::Building Guardian indexes from ${{ steps.history-hash.outputs.commit_count }} commits"
-          python3 .hyperretrieval-src/apps/cli/guardian_init.py \
+          python3 .ripple-src/apps/cli/guardian_init.py \
             --repo . \
             --artifact-dir "${{ env.ARTIFACT_DIR }}" \
             --rebuild
@@ -114,7 +114,7 @@ jobs:
 
           # Verify outputs exist
           echo "Built artifacts:"
-          ls -lh "${{ env.ARTIFACT_DIR }}/cochange_index.json" "${{ env.ARTIFACT_DIR }}/ownership_index.json" .hyperretrieval/git_history.json 2>/dev/null || true
+          ls -lh "${{ env.ARTIFACT_DIR }}/cochange_index.json" "${{ env.ARTIFACT_DIR }}/ownership_index.json" .ripple/git_history.json 2>/dev/null || true
 
       # Upload as artifact so the analyze job can use it
       - name: Upload indexes
@@ -122,9 +122,9 @@ jobs:
         with:
           name: guardian-indexes
           path: |
-            .hyperretrieval/artifacts/cochange_index.json
-            .hyperretrieval/artifacts/ownership_index.json
-            .hyperretrieval/git_history.json
+            .ripple/artifacts/cochange_index.json
+            .ripple/artifacts/ownership_index.json
+            .ripple/git_history.json
           retention-days: 30
 
   # ── Job 2: Analyze PR ────────────────────────────────────────────────────
@@ -143,14 +143,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: guardian-indexes
-          path: .hyperretrieval
+          path: .ripple
 
-      - name: Checkout HyperRetrieval
+      - name: Checkout Ripple
         uses: actions/checkout@v4
         with:
-          repository: amitshukla-stack/hyper-retrieval
+          repository: amitshukla-stack/ripple
           ref: ${{ env.HYPERRETRIEVAL_VERSION }}
-          path: .hyperretrieval-src
+          path: .ripple-src
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -185,7 +185,7 @@ jobs:
             RULES_ARG="--rules guardian_rules.yaml"
           fi
 
-          REPORT=$(python3 .hyperretrieval-src/apps/cli/pr_analyzer.py \
+          REPORT=$(python3 .ripple-src/apps/cli/pr_analyzer.py \
             --mode guardian \
             --artifact-dir "${{ env.ARTIFACT_DIR }}" \
             $RULES_ARG \
@@ -205,7 +205,7 @@ jobs:
             RULES_ARG="--rules guardian_rules.yaml"
           fi
 
-          python3 .hyperretrieval-src/apps/cli/pr_analyzer.py \
+          python3 .ripple-src/apps/cli/pr_analyzer.py \
             --mode guardian \
             --format json \
             --artifact-dir "${{ env.ARTIFACT_DIR }}" \
@@ -240,7 +240,7 @@ jobs:
               body += `\n\n<details>\n<summary>Raw JSON report</summary>\n\n\`\`\`json\n${jsonReport}\n\`\`\`\n\n</details>`;
             }
 
-            body += `\n\n---\n_Powered by [HyperRetrieval](https://github.com/amitshukla-stack/hyper-retrieval) Guardian Lite_`;
+            body += `\n\n---\n_Powered by [Ripple](https://github.com/amitshukla-stack/ripple) Guardian Lite_`;
 
             // Upsert: update existing comment or create new one
             const { data: comments } = await github.rest.issues.listComments({

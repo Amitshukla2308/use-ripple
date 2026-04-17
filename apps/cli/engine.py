@@ -2,12 +2,12 @@
 engine.py — HyperCode QueryEngine.
 
 ReAct loop powered by Kimi (or any OpenAI-compatible LLM) with:
-  - Full HyperRetrieval tool suite (retrieval + coding tools)
+  - Full Ripple tool suite (retrieval + coding tools)
   - Token budget tracking with auto-compaction at context limits
   - Post-turn memory extraction trigger
   - Permission callbacks for destructive tool calls
 
-Ported from codetoolcli's QueryEngine — adapted for HyperRetrieval's stack.
+Ported from codetoolcli's QueryEngine — adapted for Ripple's stack.
 """
 import json
 import os
@@ -48,7 +48,7 @@ TOKEN_COMPACT_KEEP_MSGS = int(os.environ.get("HRCODE_COMPACT_KEEP",  "8"))  # re
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 _SYSTEM_PROMPT = """\
-You are HyperCode — a senior software engineer AI embedded in the HyperRetrieval platform.
+You are HyperCode — a senior software engineer AI embedded in the Ripple platform.
 
 You act on code directly. You read files, write them, run tests, trace call graphs, \
 search 94 k indexed symbols, commit changes, and explain what you find. \
@@ -230,7 +230,7 @@ class QueryEngine:
     extra_system       : additional text appended to the system prompt
     verbose            : print tool call details
     streaming          : stream final answer token by token
-    include_retrieval  : include HyperRetrieval codebase tools
+    include_retrieval  : include Ripple codebase tools
     session            : Session object for memory extraction (optional)
     """
 

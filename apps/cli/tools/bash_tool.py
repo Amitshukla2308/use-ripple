@@ -1,7 +1,7 @@
 """
 bash_tool.py — Secure shell command execution with permission system.
 
-Ported from codetoolcli BashTool — adapted for HyperRetrieval.
+Ported from codetoolcli BashTool — adapted for Ripple.
 Runs commands with timeout, captures stdout/stderr, truncates oversized output.
 
 Permission system:

@@ -1,4 +1,4 @@
-"""Pluggable cross-encoder reranker for HyperRetrieval.
+"""Pluggable cross-encoder reranker for Ripple.
 
 Interface: `Reranker.rerank(query, candidates) -> list[(candidate, score)]`
   - `query` is the user's original natural-language question.

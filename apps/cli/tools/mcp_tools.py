@@ -1,7 +1,7 @@
 """
 mcp_tools.py — MCP client for calling external MCP servers over HTTP/SSE.
 
-Wired to localhost:8002 (HyperRetrieval's FastMCP server) by default.
+Wired to localhost:8002 (Ripple's FastMCP server) by default.
 Also supports any external MCP server via the server_name registry.
 
 Protocol: FastMCP exposes a streamable-HTTP transport.
@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 # ── Server registry ───────────────────────────────────────────────────────────
-# "default" points to HyperRetrieval's own MCP server.
+# "default" points to Ripple's own MCP server.
 # Agents can reference any server_name registered here.
 _SERVERS: dict[str, str] = {
     "default":     os.environ.get("MCP_SERVER_URL", "http://localhost:8002"),

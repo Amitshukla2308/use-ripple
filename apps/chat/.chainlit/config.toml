@@ -88,7 +88,7 @@ reaction_on_message_received = false
 
 [UI]
 # Name of the assistant.
-name = "HyperRetrieval"
+name = "Ripple"
 
 default_theme = "dark"
 

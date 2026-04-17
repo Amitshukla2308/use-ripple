@@ -1,4 +1,4 @@
-# Guardian rules for HyperRetrieval self-dogfood
+# Guardian rules for Ripple self-dogfood
 # Used by check_my_changes / score_change_risk to flag risky PRs
 
 # ── Risk threshold ───────────────────────────────────────────────────────────
@@ -61,6 +61,6 @@ severity_scores:
 ignore_patterns:
   - "**/__pycache__/**"
   - "**/*.pyc"
-  - ".hyperretrieval/artifacts/**"
+  - ".ripple/artifacts/**"
   - "*.md"
   - ".gitignore"

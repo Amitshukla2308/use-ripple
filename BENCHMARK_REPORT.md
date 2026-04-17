@@ -1,4 +1,4 @@
-# HyperRetrieval — Benchmarking Report
+# Ripple — Benchmarking Report
 **Date:** 2026-03-23
 **Scope:** Build pipeline + Serve layer vs. global SOTA
 **Basis:** Academic papers (ACL/ICML/ASE/ESEM/ICLR 2024–2026), industry engineering blogs, MTEB/CoIR leaderboards
@@ -7,7 +7,7 @@
 
 ## Executive Summary
 
-HyperRetrieval's core design is **well-aligned with proven patterns** for production codebase intelligence. The symbol-level indexing, instruction-tuned embeddings, and graph-augmented retrieval are all first-principles correct. The gaps are incremental, not architectural.
+Ripple's core design is **well-aligned with proven patterns** for production codebase intelligence. The symbol-level indexing, instruction-tuned embeddings, and graph-augmented retrieval are all first-principles correct. The gaps are incremental, not architectural.
 
 **Overall maturity: 7.5 / 10**
 
@@ -17,7 +17,7 @@ HyperRetrieval's core design is **well-aligned with proven patterns** for produc
 
 ### Stage 1: Symbol Extraction (`01_extract.py`)
 
-| Dimension | HyperRetrieval | SOTA |
+| Dimension | Ripple | SOTA |
 |---|---|---|
 | Granularity | Function / type / class | ✅ Symbol-level is the proven winner |
 | AST fidelity | Regex + brace-matching (Haskell/Rust) | ⚠️ Full AST parsers (Tree-sitter) outperform regex by +2.7–5.5 pts on RepoEval |
@@ -26,13 +26,13 @@ HyperRetrieval's core design is **well-aligned with proven patterns** for produc
 | Call graph | Within-module + fully-qualified | ⚠️ Dynamic dispatch not resolved (acceptable for static typed langs) |
 | Co-change collection | All-pairs within commit (≤40 files) | ✅ Standard approach |
 
-**Gap:** Tree-sitter (Rust-native, 40+ languages) would give exact function boundary detection for Haskell and Rust, replacing the brace-counting heuristic. The `cAST` paper (June 2025, arxiv:2506.15655) demonstrated +5.5 pts on SWE-bench using AST-accurate boundaries vs sliding-window. HyperRetrieval is closer to AST-accurate than sliding-window but not fully there for Haskell.
+**Gap:** Tree-sitter (Rust-native, 40+ languages) would give exact function boundary detection for Haskell and Rust, replacing the brace-counting heuristic. The `cAST` paper (June 2025, arxiv:2506.15655) demonstrated +5.5 pts on SWE-bench using AST-accurate boundaries vs sliding-window. Ripple is closer to AST-accurate than sliding-window but not fully there for Haskell.
 
 ---
 
 ### Stage 2: Graph Clustering (`02_build_graph.py`)
 
-| Dimension | HyperRetrieval | SOTA |
+| Dimension | Ripple | SOTA |
 |---|---|---|
 | Algorithm | Louvain (resolution=1.2) | ⚠️ **Leiden algorithm** supersedes Louvain as of 2024 |
 | Graph level | Module-level for clustering | ✅ Correct — node-level Louvain on large graphs is intractable |
@@ -45,7 +45,7 @@ HyperRetrieval's core design is **well-aligned with proven patterns** for produc
 
 ### Stage 3: Embedding (`03_embed.py`)
 
-| Dimension | HyperRetrieval | SOTA |
+| Dimension | Ripple | SOTA |
 |---|---|---|
 | Model | Qwen3-Embedding-8B | ✅ **#1 MTEB Code (80.68)** as of March 2026 — correct choice |
 | Instruction prefix | Yes ("Represent this code module for...") | ✅ Required for Qwen3; omitting drops MTEB score ~4 pts |
@@ -60,7 +60,7 @@ HyperRetrieval's core design is **well-aligned with proven patterns** for produc
 
 ### Stage 4: LLM Summarization (`04_summarize.py`)
 
-| Dimension | HyperRetrieval | SOTA |
+| Dimension | Ripple | SOTA |
 |---|---|---|
 | Sampling | Stratified across modules | ✅ Avoids bias toward large modules |
 | Retry | Exponential backoff (2^n, max 5) | ✅ |
@@ -74,7 +74,7 @@ HyperRetrieval's core design is **well-aligned with proven patterns** for produc
 
 ### Stage 6: Co-Change Index (`06_build_cochange.py`)
 
-| Dimension | HyperRetrieval | SOTA |
+| Dimension | Ripple | SOTA |
 |---|---|---|
 | Weighting | Raw co-occurrence count | ✅ Simple, interpretable |
 | Memory | Streaming `ijson` | ✅ O(1) memory on 1.1GB file |
@@ -88,7 +88,7 @@ HyperRetrieval's core design is **well-aligned with proven patterns** for produc
 
 ### Stage 7: Doc Chunking (`07_chunk_docs.py`)
 
-| Dimension | HyperRetrieval | SOTA |
+| Dimension | Ripple | SOTA |
 |---|---|---|
 | Split strategy | H2/H3 headings, max 3000 chars | ✅ Semantic boundaries beat fixed-size for markdown |
 | Max chunk size | 3000 chars | ⚠️ 3000 chars ≈ 750 tokens — fine for Qwen3's 8192 token limit |
@@ -121,7 +121,7 @@ No significant gap here.
 5. Cross-encoder rerank                   ← precision at top-10
 ```
 
-| Component | HyperRetrieval | SOTA |
+| Component | Ripple | SOTA |
 |---|---|---|
 | Dense retrieval | ✅ Stratified, multi-query | ✅ |
 | Exact/keyword | ✅ BM25 (rank_bm25) + IDF-weighted keyword search | ✅ |
@@ -137,7 +137,7 @@ No significant gap here.
 
 ### Tool Interface (`tools.py` / MCP)
 
-| Dimension | HyperRetrieval | SOTA |
+| Dimension | Ripple | SOTA |
 |---|---|---|
 | Tool count | 8 tools | ✅ Research shows >10 tools degrades LLM performance |
 | Tool granularity | Coarse (module) → fine (symbol) | ✅ Matches optimal ReAct pattern |
@@ -164,7 +164,7 @@ Current: top 20 modules by score, scores are semantic similarity + keyword hits.
 
 ### Context Assembly & LLM Utilization
 
-| Dimension | HyperRetrieval | SOTA |
+| Dimension | Ripple | SOTA |
 |---|---|---|
 | Context ordering | Appended in retrieval order | ⚠️ Lost-in-the-Middle: put highest-relevance results first |
 | Token budget | 16K tool rounds / 65K final | ✅ Generous; Kimi supports 128K |
@@ -177,24 +177,24 @@ Current: top 20 modules by score, scores are semantic similarity + keyword hits.
 
 ### vs. Sourcegraph Cody
 - Cody: BM25 + semantic, no pre-built graph, ~100K lines per response, no symbol-level embeddings
-- HyperRetrieval: symbol-level graph + co-change + structured summaries + MCP tool interface
-- **HyperRetrieval advantage:** Graph topology awareness, co-change coupling, cluster summaries, blast-radius analysis
+- Ripple: symbol-level graph + co-change + structured summaries + MCP tool interface
+- **Ripple advantage:** Graph topology awareness, co-change coupling, cluster summaries, blast-radius analysis
 - **Cody advantage:** Real-time (no pre-build), multi-language Tree-sitter parsing
 
 ### vs. Cursor
 - Cursor: Dynamic BM25 + semantic on-the-fly, no persistent graph, repo-map (ctags-level)
-- **HyperRetrieval advantage:** Deep pre-computed graph, cluster summaries, cross-service coupling
+- **Ripple advantage:** Deep pre-computed graph, cluster summaries, cross-service coupling
 - **Cursor advantage:** Zero setup, always current, handles any language
 
 ### vs. Augment Code
 - Augment: Maintains explicit symbol-reference graph, near-real-time, cloud-hosted
-- Most similar architecture to HyperRetrieval; Augment has real-time delta updates, HyperRetrieval requires full rebuild
-- **HyperRetrieval advantage:** Co-change index, self-hosted with domain-specific graph customization
+- Most similar architecture to Ripple; Augment has real-time delta updates, Ripple requires full rebuild
+- **Ripple advantage:** Co-change index, self-hosted with domain-specific graph customization
 - **Augment advantage:** Always-current, Tree-sitter exact boundaries
 
 ### vs. GitHub Copilot Workspace
 - Copilot: Retrieval-augmented, no persistent graph, heavy embedding cache
-- **HyperRetrieval advantage:** Richer structural context (call graph, co-change, cluster summaries)
+- **Ripple advantage:** Richer structural context (call graph, co-change, cluster summaries)
 
 ---
 
@@ -217,7 +217,7 @@ Current: top 20 modules by score, scores are semantic similarity + keyword hits.
 
 ## Verdict
 
-HyperRetrieval is **production-quality** for a v1 system. The embedding model choice (Qwen3-8B) is globally optimal. The graph + co-change dual-indexing is more sophisticated than most commercial tools. The MCP tool structure and ReAct loop design align with best-practice findings.
+Ripple is **production-quality** for a v1 system. The embedding model choice (Qwen3-8B) is globally optimal. The graph + co-change dual-indexing is more sophisticated than most commercial tools. The MCP tool structure and ReAct loop design align with best-practice findings.
 
 BM25 + RRF fusion is now implemented (`unified_search`). The primary remaining engineering debt is the **cross-encoder reranker** (estimated +8–15% precision@10) and the **Leiden clustering fix** (low-effort correctness improvement). Everything else is refinement.
 

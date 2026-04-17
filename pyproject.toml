@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "hyperretrieval"
+name = "ripple"
 version = "0.6.0"
 description = "Self-hosted codebase intelligence platform — graph + vector indexing with MCP tools for IDE-embedded LLMs"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [
-    { name = "Amit", email = "amit@hyperretrieval.dev" },
+    { name = "Amit", email = "amitshukla2308@gmail.com" },
 ]
 keywords = ["codebase-intelligence", "code-search", "mcp", "rag", "blast-radius"]
 classifiers = [
@@ -78,11 +78,11 @@ web = [
 ]
 # Everything
 all = [
-    "hyperretrieval[build,grammars,chat,mcp,embeddings,search,web]",
+    "ripple[build,grammars,chat,mcp,embeddings,search,web]",
 ]
 
 [project.scripts]
-hyperretrieval = "apps.cli.hrcode:main"
+ripple = "apps.cli.hrcode:main"
 hr-embed = "serve.embed_server:main"
 hr-pr = "apps.cli.pr_analyzer:main"
 

@@ -46,7 +46,7 @@ NC   = "\033[0m"
 # ══════════════════════════════════════════════════════════════════════════════
 # CLI args
 # ══════════════════════════════════════════════════════════════════════════════
-parser = argparse.ArgumentParser(description="LLM-powered auto eval for HyperRetrieval")
+parser = argparse.ArgumentParser(description="LLM-powered auto eval for Ripple")
 parser.add_argument("--refresh",       action="store_true", help="Regenerate all LLM cases")
 parser.add_argument("--samples",       type=int, default=5,  help="Functions sampled per service")
 parser.add_argument("--cross-service", type=int, default=10, help="Cross-service cases to generate")

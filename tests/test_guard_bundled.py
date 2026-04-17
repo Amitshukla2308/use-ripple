@@ -2,7 +2,7 @@
 
 The existing `test_guard_integration.py` test pins `HR_GUARD_PATH` to the
 external prototype location for dev parity. This test covers the *installed
-user* path — no env vars, Guard loads from the bundled `hyperretrieval/
+user* path — no env vars, Guard loads from the bundled `ripple/
 guardrails/comment_code_checker.py` that ships with the package.
 """
 from __future__ import annotations

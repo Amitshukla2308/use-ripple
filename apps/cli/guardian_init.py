@@ -17,7 +17,7 @@ Usage:
   python3 guardian_init.py --artifact-dir .guardian/
 
   # Then run Guardian analysis:
-  python3 pr_analyzer.py --mode guardian --files changed_file.py --artifact-dir .hyperretrieval/artifacts
+  python3 pr_analyzer.py --mode guardian --files changed_file.py --artifact-dir .ripple/artifacts
 """
 import argparse, json, os, pathlib, subprocess, sys, time
 
@@ -29,7 +29,7 @@ def main():
     parser.add_argument("--repo", type=pathlib.Path, default=".",
                         help="Path to git repo (default: current directory)")
     parser.add_argument("--artifact-dir", type=pathlib.Path, default=None,
-                        help="Where to store indexes (default: <repo>/.hyperretrieval/artifacts)")
+                        help="Where to store indexes (default: <repo>/.ripple/artifacts)")
     parser.add_argument("--min-weight", type=int, default=None,
                         help="Min co-change weight (default: auto)")
     parser.add_argument("--rebuild", action="store_true",
@@ -41,7 +41,7 @@ def main():
         print(f"Error: {repo} is not a git repository", file=sys.stderr)
         sys.exit(1)
 
-    artifact_dir = args.artifact_dir or (repo / ".hyperretrieval" / "artifacts")
+    artifact_dir = args.artifact_dir or (repo / ".ripple" / "artifacts")
     artifact_dir = artifact_dir.resolve()
     artifact_dir.mkdir(parents=True, exist_ok=True)
 

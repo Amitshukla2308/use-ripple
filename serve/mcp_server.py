@@ -1,5 +1,5 @@
 """
-mcp_server.py — HyperRetrieval MCP server
+mcp_server.py — Ripple MCP server
 
 Exposes codebase intelligence as 8 MCP tools.
 
@@ -52,7 +52,7 @@ _args, _ = _parser.parse_known_args()
 
 MCP_PORT = _args.port
 mcp = FastMCP(
-    "hyperretrieval",
+    "ripple",
     host="127.0.0.1",
     port=MCP_PORT,
     sse_path="/sse",

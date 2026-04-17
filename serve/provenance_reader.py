@@ -1,4 +1,4 @@
-"""AI-code provenance reader for HyperRetrieval.
+"""AI-code provenance reader for Ripple.
 
 Consumes provenance signals produced by vendor-agnostic AI-attribution tools
 (Git AI, Agent Blame, Tabnine) and exposes them to `check_my_changes` so

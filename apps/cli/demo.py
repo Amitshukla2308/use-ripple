@@ -74,7 +74,7 @@ def render_html(repo_name: str, top: list, cochange: dict, commit_count: int) ->
 <html>
 <head>
   <meta charset="utf-8">
-  <title>HyperRetrieval Demo — {repo_name}</title>
+  <title>Ripple Demo — {repo_name}</title>
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
            max-width: 1100px; margin: 40px auto; padding: 0 20px; color: #1a1a2e; }}
@@ -100,14 +100,14 @@ def render_html(repo_name: str, top: list, cochange: dict, commit_count: int) ->
   </style>
 </head>
 <body>
-  <h1>🔍 HyperRetrieval — Blast Radius Report</h1>
+  <h1>🔍 Ripple — Blast Radius Report</h1>
   <div class="sub">
     <strong>{repo_name}</strong> &nbsp;·&nbsp;
     {commit_count} commits analyzed &nbsp;·&nbsp;
     <span class="badge">zero GPU · no config</span>
   </div>
   <a class="cta" href="https://github.com/Amitshukla2308/Index-the-code">
-    Get full HyperRetrieval (15 MCP tools) →
+    Get full Ripple (15 MCP tools) →
   </a>
   <table>
     <thead>
@@ -124,7 +124,7 @@ def render_html(repo_name: str, top: list, cochange: dict, commit_count: int) ->
   <p class="legend">
     <strong>Blast score</strong> = sum of co-change weights across {commit_count} commits.
     Higher = more central to the codebase. Change these files carefully.
-    <br>Full HyperRetrieval adds: criticality scoring, Guard static checks, cross-repo signals,
+    <br>Full Ripple adds: criticality scoring, Guard static checks, cross-repo signals,
     semantic search, and 15 MCP tools for AI coding agents.
   </p>
 </body>
@@ -149,7 +149,7 @@ def commit_count(repo_path: str) -> int:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="HyperRetrieval demo — instant blast-radius report from git history"
+        description="Ripple demo — instant blast-radius report from git history"
     )
     parser.add_argument("target", help="GitHub URL or local repo path")
     parser.add_argument("--output", default="hr-demo-report.html", help="Output HTML file")

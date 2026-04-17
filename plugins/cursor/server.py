@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HyperRetrieval MCP Server — Cursor Plugin Edition
+Ripple MCP Server — Cursor Plugin Edition
 
 Lightweight MCP server exposing code impact intelligence tools.
 Requires only git-history-based artifacts (co-change + ownership indexes).
@@ -24,7 +24,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 ARTIFACT_DIR = os.environ.get(
     "HR_ARTIFACT_DIR",
-    str(pathlib.Path.cwd() / ".hyperretrieval" / "artifacts")
+    str(pathlib.Path.cwd() / ".ripple" / "artifacts")
 )
 os.environ["ARTIFACT_DIR"] = ARTIFACT_DIR
 
@@ -37,7 +37,7 @@ except ImportError:
 import retrieval_engine as RE
 
 mcp = FastMCP(
-    "HyperRetrieval",
+    "Ripple",
     description="Code impact intelligence — blast radius, missing changes, reviewers"
 )
 
@@ -75,7 +75,7 @@ def get_blast_radius(files_or_modules: list[str], max_hops: int = 2) -> str:
         max_hops: Import graph traversal depth (default: 2)
     """
     if not _ready:
-        return "HyperRetrieval not initialized. Run the init hook or: python3 init.py --repo ."
+        return "Ripple not initialized. Run the init hook or: python3 init.py --repo ."
 
     resolved = RE.resolve_files_to_modules(files_or_modules)
     seed_mods = []
@@ -128,7 +128,7 @@ def predict_missing_changes(changed_files: list[str], min_confidence: float = 0.
         min_confidence: Minimum confidence threshold 0-1
     """
     if not _ready:
-        return "HyperRetrieval not initialized."
+        return "Ripple not initialized."
 
     resolved = RE.resolve_files_to_modules(changed_files)
     mods = []
@@ -171,7 +171,7 @@ def suggest_reviewers(changed_files: list[str], top_k: int = 5) -> str:
         top_k: Number of reviewers to suggest
     """
     if not _ready:
-        return "HyperRetrieval not initialized."
+        return "Ripple not initialized."
 
     resolved = RE.resolve_files_to_modules(changed_files)
     mods = []

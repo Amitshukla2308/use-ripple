@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-hrcode.py — HyperCode CLI  (HyperRetrieval's AI coding tool)
+hrcode.py — HyperCode CLI  (Ripple's AI coding tool)
 
 A full-featured interactive AI coding assistant with:
   • 20 tools: bash, file I/O, glob, grep, sub-agent + 13 retrieval tools
@@ -9,10 +9,10 @@ A full-featured interactive AI coding assistant with:
   • Streaming output powered by Kimi LLM
 
 Equivalent to codetoolcli (Claude Code CLI) but:
-  - Written in Python (same stack as HyperRetrieval)
+  - Written in Python (same stack as Ripple)
   - Uses Kimi via LLM_BASE_URL / LLM_API_KEY
   - Integrates directly with retrieval_engine.py (no HTTP intermediary)
-  - Named for HyperRetrieval conventions
+  - Named for Ripple conventions
 
 Usage
 -----
@@ -68,7 +68,7 @@ if _RICH:
 # ── Startup banner ────────────────────────────────────────────────────────────
 
 _BANNER = """\
-HyperCode  — AI coding assistant for HyperRetrieval
+HyperCode  — AI coding assistant for Ripple
 Type your query or /help for commands.  Ctrl+C / /exit to quit.
 """
 
@@ -259,7 +259,7 @@ def run_oneshot(query: str, session: Session, engine: QueryEngine) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="hrcode",
-        description="HyperCode — AI coding assistant for HyperRetrieval",
+        description="HyperCode — AI coding assistant for Ripple",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

@@ -1,4 +1,4 @@
-# HyperRetrieval
+# Ripple
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
@@ -9,7 +9,7 @@
 
 Works inside **Claude Code · Cursor · GitHub Copilot Agent · OpenHands · Windsurf**
 
-Static analysis tells you what *could* break. Git history tells you what *actually* breaks together. The gap between those two is where production incidents live — and where HyperRetrieval operates.
+Static analysis tells you what *could* break. Git history tells you what *actually* breaks together. The gap between those two is where production incidents live — and where Ripple operates.
 
 ---
 
@@ -33,7 +33,7 @@ You get an HTML report of the highest-risk files ranked by co-change history. **
 
 ### Blast Radius — +322% recall over static import graph
 
-Every other tool counts import edges. HyperRetrieval counts how often files *actually changed together* across your git history. The difference: only **14.9% of import neighbors ever co-change** — the static graph predicts risk for files that don't need review. Temporal signals catch the 85% the graph misses.
+Every other tool counts import edges. Ripple counts how often files *actually changed together* across your git history. The difference: only **14.9% of import neighbors ever co-change** — the static graph predicts risk for files that don't need review. Temporal signals catch the 85% the graph misses.
 
 | Metric | Static (v1) | Temporal (v2) | Delta |
 |--------|------------|--------------|-------|
@@ -46,7 +46,7 @@ AI-generated code passes every review gate because it *looks* correct. Guard ver
 
 ```bash
 # Run on any Python/Haskell/Rust/Go/JS codebase
-python3 -m hyperretrieval.guard path/to/changed_file.py
+python3 -m ripple.guard path/to/changed_file.py
 ```
 
 Patterns: lock scope, premature release, transaction boundaries, auth-before-action, error swallowing.
@@ -58,7 +58,7 @@ One config block gives your entire team's AI assistants access to your codebase'
 ```json
 {
   "mcpServers": {
-    "hyperretrieval": {
+    "ripple": {
       "type": "sse",
       "url": "http://127.0.0.1:8002/sse"
     }
@@ -199,7 +199,7 @@ Indexes built once, loaded at startup: symbol graph, vector store (LanceDB), co-
 
 ## Research
 
-HyperRetrieval's temporal signals thesis was validated on a 94K-symbol, 12-service production codebase (113,916 commits):
+Ripple's temporal signals thesis was validated on a 94K-symbol, 12-service production codebase (113,916 commits):
 
 - **Cross-repo co-change**: signal is real (p < 10⁻¹³), orthogonal to import graph (0.54% overlap), 1.91× weight when import edge present
 - **Change prediction model**: activity features dominate (79–84% importance); structural features add near-zero at short horizons (K=3)
