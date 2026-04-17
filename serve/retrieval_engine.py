@@ -49,12 +49,13 @@ G:             object = None   # NetworkX node-level graph
 MG:            object = None   # NetworkX module-level import graph
 lance_tbl:     object = None   # LanceDB code vector table
 doc_lance_tbl: object = None   # LanceDB doc vector table
-reranker:      object = None   # CrossEncoder — disabled (kept for reference)
+reranker:      object = None   # CrossEncoder (ms-marco-MiniLM-L-6-v2, CPU) — loaded when HR_RERANKER=1
 
 cluster_summaries:   dict  = {}
 cochange_index:      dict  = {}
 ownership_index:     dict  = {}   # module → [{"email","name","commits"}, ...]
 granger_index:       dict  = {}   # "A→B" → {"source","target","best_lag","p_value","f_statistic"}
+granger_cross_index: dict  = {}   # cross-service Granger, same schema, same key format
 community_index:     dict  = {}   # community_id → {"size","services","label","cross_service"}
 module_to_community: dict  = {}   # module_cc_key → community_id
 activity_index:      dict  = {}   # module_name → {"activity_score", "activity_50", "activity_200"}
@@ -475,6 +476,16 @@ def initialize(
             print(f"  {meta_gi.get('significant_results', 0):,} causal pairs  "
                   f"(p<{meta_gi.get('p_threshold', 0.05)})")
 
+        granger_cross_path = artifact_dir / "granger_cross_index.json"
+        if granger_cross_path.exists():
+            print("Loading cross-service Granger index...")
+            with open(str(granger_cross_path)) as _f:
+                gci = json.load(_f)
+            granger_cross_index.update(gci.get("causal_pairs", {}))
+            meta_gci = gci.get("metadata", {})
+            print(f"  {meta_gci.get('significant_results', 0):,} cross-service causal pairs "
+                  f"({meta_gci.get('pairs_tested', 0):,} tested)")
+
         community_path = artifact_dir / "community_index.json"
         if community_path.exists():
             print("Loading community index...")
@@ -567,6 +578,16 @@ def initialize(
         print(f"  Embed server: {EMBED_SERVER_URL} (no local GPU load)")
     else:
         print("  Embedder: skipped (keyword-only mode)")
+
+    # Cross-encoder reranker (CPU, ~7MB) — opt-in via HR_RERANKER=1
+    global reranker
+    if os.environ.get("HR_RERANKER", "") == "1" and reranker is None:
+        try:
+            from sentence_transformers import CrossEncoder as _CE
+            reranker = _CE("cross-encoder/ms-marco-MiniLM-L-6-v2")
+            print("  Reranker: cross-encoder/ms-marco-MiniLM-L-6-v2 loaded (CPU)")
+        except Exception as _e:
+            print(f"  Reranker: failed to load ({_e!r})")
 
     if _llm_client is None:
         from openai import OpenAI
@@ -988,20 +1009,22 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
         hop = nb["hop"]
         static_score = 1.0 / hop  # 1.0 for hop 1, 0.5 for hop 2, etc.
 
-        # Check for Granger causal evidence
+        # Check for Granger causal evidence (intra + cross-service)
         granger_score = 0.0
         granger_info = None
-        if granger_index:
+        if granger_index or granger_cross_index:
             for s in seed:
                 cc_s = _resolve_cc(s)
                 cc_t = _resolve_cc(mod)
                 for key in (f"{cc_s}→{cc_t}", f"{cc_t}→{cc_s}"):
-                    if key in granger_index:
-                        g = granger_index[key]
-                        gs = 1.0 - min(g["p_value"] * 20, 1.0)  # p=0 → 1.0, p=0.05 → 0.0
-                        if gs > granger_score:
-                            granger_score = gs
-                            granger_info = {"lag": g["best_lag"], "p_value": g["p_value"]}
+                    for gi in (granger_index, granger_cross_index):
+                        if key in gi:
+                            g = gi[key]
+                            gs = 1.0 - min(g["p_value"] * 20, 1.0)
+                            if gs > granger_score:
+                                granger_score = gs
+                                granger_info = {"lag": g["best_lag"], "p_value": g["p_value"]}
+                            break
 
         # Activity boost: recently changed modules are more likely to be affected
         act_score = activity_index.get(mod, {}).get("activity_score", 0.0)
@@ -1027,17 +1050,19 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
 
         granger_score = 0.0
         granger_info = None
-        if granger_index:
+        if granger_index or granger_cross_index:
             for s in seed:
                 cc_s = _resolve_cc(s)
                 cc_t = _resolve_cc(mod)
                 for key in (f"{cc_s}→{cc_t}", f"{cc_t}→{cc_s}"):
-                    if key in granger_index:
-                        g = granger_index[key]
-                        gs = 1.0 - min(g["p_value"] * 20, 1.0)
-                        if gs > granger_score:
-                            granger_score = gs
-                            granger_info = {"lag": g["best_lag"], "p_value": g["p_value"]}
+                    for gi in (granger_index, granger_cross_index):
+                        if key in gi:
+                            g = gi[key]
+                            gs = 1.0 - min(g["p_value"] * 20, 1.0)
+                            if gs > granger_score:
+                                granger_score = gs
+                                granger_info = {"lag": g["best_lag"], "p_value": g["p_value"]}
+                            break
 
         if mod in tiered:
             # Already in import graph — boost confidence with co-change + activity evidence
@@ -1162,17 +1187,20 @@ def predict_missing_changes(changed_modules: list, min_weight: int = 5,
         confidence = min(1.0, (ev["total_weight"] / 50) * (source_count / len(changed_set)))
 
         # Granger causality boost: if any changed module causally predicts this candidate
+        # Checks intra-service index first, then cross-service index
         causal_info = None
-        if granger_index:
+        if granger_index or granger_cross_index:
             best_causal = None
             for src in ev["sources"]:
                 cc_src = _resolve_cc(src["from"])
                 cc_tgt = _resolve_cc(mod)
                 key = f"{cc_src}→{cc_tgt}"
-                if key in granger_index:
-                    g = granger_index[key]
-                    if best_causal is None or g["p_value"] < best_causal["p_value"]:
-                        best_causal = g
+                for gi in (granger_index, granger_cross_index):
+                    if key in gi:
+                        g = gi[key]
+                        if best_causal is None or g["p_value"] < best_causal["p_value"]:
+                            best_causal = g
+                            break
             if best_causal:
                 causal_info = {
                     "direction": f"{best_causal['source'].split('::')[-1]}→{best_causal['target'].split('::')[-1]}",
@@ -1815,6 +1843,42 @@ def fast_search(query: str, top_k: int = 10) -> dict:
         return bm25
     # BM25 found nothing — token not in index, try substring fallback
     return cross_service_keyword_search(query, max_per_service=top_k)
+
+
+def fast_search_reranked(query: str, top_k: int = 10) -> dict:
+    """BM25 top-30 → cross-encoder rerank → top-k. Requires HR_RERANKER=1 at startup.
+
+    Falls back to fast_search() when reranker is not loaded.
+    Context string per candidate: symbol_id (dots stripped) + body[:150].
+    All pairs scored in one batch call (~15-25ms on CPU).
+    """
+    if reranker is None:
+        return fast_search(query, top_k=top_k)
+
+    # Expanded BM25 window for reranker to promote buried-but-relevant results
+    bm25 = bm25_search(query, top_k=30)
+    if not bm25:
+        return cross_service_keyword_search(query, max_per_service=top_k)
+
+    flat = [n for nodes in bm25.values() for n in nodes]
+    if not flat:
+        return bm25
+
+    # Build (query, context) pairs — strip dots so tokenizer sees words, not hierarchy
+    pairs = []
+    for node in flat:
+        nid = node.get("id", node.get("name", ""))
+        body = body_store.get(nid, "")[:150]
+        ctx = nid.replace(".", " ") + " " + body
+        pairs.append((query, ctx))
+
+    scores = reranker.predict(pairs)
+
+    ranked = sorted(zip(scores, flat), key=lambda x: -x[0])
+    result: dict = defaultdict(list)
+    for score, node in ranked[:top_k]:
+        result[node.get("service", "unknown")].append({**node, "_rerank_score": float(score)})
+    return dict(result)
 
 
 # ════════════════════════════════════════════════════════════════════════════

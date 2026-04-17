@@ -788,6 +788,28 @@ def fast_search(query: str, top_k: int = 10) -> str:
 
 
 @mcp.tool()
+def fast_search_reranked(query: str, top_k: int = 10) -> str:
+    """
+    BM25 search with cross-encoder reranking. Requires HR_RERANKER=1 at startup.
+    Falls back to fast_search if the reranker is not loaded.
+
+    Fetches BM25 top-30, scores each with ms-marco-MiniLM-L-6-v2 (CPU, ~20ms),
+    and returns the reranked top-k. Significantly better than fast_search when
+    the correct symbol is in the BM25 window but buried below irrelevant matches.
+
+    Use this when:
+    - fast_search returns results but top-3 feel wrong
+    - Your query is conceptual ('webhook notification handler') not a bare identifier
+    - You want best keyword-mode precision without GPU/embed server
+
+    Args:
+        query:  Natural-language or identifier query
+        top_k:  Max total results (default 10)
+    """
+    return T.tool_fast_search_reranked(query, top_k)
+
+
+@mcp.tool()
 def get_why_context(symbol_name: str) -> str:
     """
     WHY context for a module or symbol: ownership, activity trend, Granger causal

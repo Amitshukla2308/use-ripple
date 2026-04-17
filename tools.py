@@ -351,6 +351,25 @@ AGENT_TOOLS = [
         }, "required": ["query"]}
     }},
     {"type": "function", "function": {
+        "name": "fast_search_reranked",
+        "description": (
+            "BM25 search with cross-encoder reranking. Requires HR_RERANKER=1 at startup; "
+            "falls back to fast_search otherwise.\n\n"
+            "Fetches BM25 top-30, then scores each candidate with a cross-encoder "
+            "(ms-marco-MiniLM-L-6-v2) using symbol ID + function body as context. "
+            "Adds ~20ms over fast_search. Significantly better for queries where the "
+            "right symbol is in the BM25 window but ranked below irrelevant high-score matches.\n\n"
+            "Use this when:\n"
+            "- fast_search returns results but the top-3 feel wrong\n"
+            "- Your query is conceptual ('webhook notification handler') not an identifier\n"
+            "- You want the best keyword-mode result without GPU/embed server"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "query":  {"type": "string", "description": "Natural-language or identifier query"},
+            "top_k":  {"type": "integer", "description": "Max total results (default 10)"}
+        }, "required": ["query"]}
+    }},
+    {"type": "function", "function": {
         "name": "get_why_context",
         "description": (
             "Returns WHY context for a module or symbol: ownership history, activity trend, "
@@ -885,6 +904,23 @@ def tool_fast_search(query: str, top_k: int = 10) -> str:
     return "\n".join(lines)
 
 
+def tool_fast_search_reranked(query: str, top_k: int = 10) -> str:
+    """BM25 top-30 → cross-encoder rerank → top-k. Falls back to fast_search if reranker absent."""
+    merged = RE.fast_search_reranked(query, top_k=top_k)
+    if not merged:
+        return f"No results for '{query}'. Try search_symbols for semantic matching."
+    reranked = RE.reranker is not None
+    tag = "BM25+RERANKED" if reranked else "BM25+keyword (reranker not loaded)"
+    lines = [f"FAST SEARCH ({tag}): '{query}'"]
+    for svc in sorted(merged):
+        for h in merged[svc]:
+            nid = h.get("id") or h.get("name", "?")
+            score = h.get("_rerank_score", h.get("_bm25_score", 0))
+            lines.append(f"  [{svc}] {nid}  (score={score:.4f})")
+    lines.append("\n→ Use get_function_body() with the full ID shown above.")
+    return "\n".join(lines)
+
+
 def tool_get_why_context(symbol_name: str) -> str:
     """WHY context: ownership, activity trend, Granger causality, anti-patterns."""
     data = RE.get_why_context(symbol_name)
@@ -1286,6 +1322,7 @@ TOOL_DISPATCH: dict = {
     "trace_callers":         lambda a: tool_trace_callers(a.get("fn_id",""), a.get("reason","")),
     "get_log_patterns":      lambda a: tool_get_log_patterns(a.get("fn_id","")),
     "fast_search":           lambda a: tool_fast_search(a.get("query",""), int(a.get("top_k", 10))),
+    "fast_search_reranked":  lambda a: tool_fast_search_reranked(a.get("query",""), int(a.get("top_k", 10))),
     "get_why_context":       lambda a: tool_get_why_context(a.get("symbol_name","")),
     "search_symbols":        lambda a: tool_search_symbols(a.get("query",""), a.get("service",""), a.get("brief", False)),
     "search_modules":        lambda a: tool_search_modules(a.get("query",""), a.get("service","")),
