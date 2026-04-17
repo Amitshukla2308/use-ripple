@@ -72,12 +72,14 @@ One config block gives your entire team's AI assistants access to your codebase'
 |------|----------------|
 | `check_my_changes` | Full PR verdict: blast radius + Guard + risk score + reviewers |
 | `get_blast_radius` | Which files co-change with these? Tiered by confidence. |
+| `get_why_context` | WHY is this code the way it is? Ownership, activity trend, Granger causal direction, anti-patterns. |
 | `predict_missing_changes` | What files are likely missing from this PR? |
 | `score_change_risk` | Composite 0-100 risk score for a changeset |
 | `suggest_reviewers` | Who owns these modules from git history? |
 | `check_criticality` | How critical is this module? (blast + coupling + recency) |
 | `get_guardrails` | What must stay true when touching this module? |
 | `list_critical_modules` | Top-N highest-risk modules in the codebase |
+| `fast_search` | Zero-GPU BM25 keyword search, ~40ms p50. No embed server needed. |
 | `search_symbols` | Semantic + keyword + co-change fusion search |
 | `search_modules` | Find which namespace contains relevant code |
 | `get_module` | All symbols in a module |
@@ -174,7 +176,7 @@ Copy `.github/workflows/guardian-lite.yml` to any repo for automatic PR risk sco
 
 ```
 embed_server.py (:8001)   — loads embedding model once; all servers connect to it
-mcp_server.py   (:8002)   — 15 MCP tools over SSE
+mcp_server.py   (:8002)   — 28 MCP tools over SSE
 demo_server_v6.py (:8000) — Chainlit chat UI (optional)
 retrieval_engine.py       — core: all indexes, all retrieval logic, imported by everything
 ```
