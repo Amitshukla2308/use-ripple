@@ -523,6 +523,81 @@ AGENT_TOOLS = [
             "context_lines":    {"type": "integer", "description": "Context lines around matches (default 0)."},
         }, "required": ["pattern"]},
     }},
+    # ── Guardrails / Criticality tools (SDLC guardian surface) ────────────────
+    {"type": "function", "function": {
+        "name": "check_my_changes",
+        "description": (
+            "SDLC guardian: run ALL quality checks on a set of changed files in one call. "
+            "Combines blast_radius + predict_missing_changes + security scan + Guard static "
+            "checks (comment-code alignment, lock/transaction/auth patterns). Returns a single "
+            "PASS / WARN / FAIL verdict with reasons and action items. Designed for AI coding "
+            "agents to self-check BEFORE committing.\n\n"
+            "Use AFTER writing code but BEFORE committing — catches missing co-changes, "
+            "unexpectedly large blast radius, comment/code mismatches, and security-sensitive "
+            "modules that need review.\n\n"
+            "Accepts file paths or module names.\n"
+            "Examples:\n"
+            "  check_my_changes(['api-gateway/src/routes.py'])\n"
+            "  check_my_changes(['PaymentFlows', 'TransactionHelper'])"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "changed_files": {
+                "type": "array", "items": {"type": "string"},
+                "description": "Paths or module names of the files you changed."
+            },
+        }, "required": ["changed_files"]},
+    }},
+    {"type": "function", "function": {
+        "name": "check_criticality",
+        "description": (
+            "Get the criticality score (0-1) of one or more modules. Score is computed from 7 "
+            "signals: blast radius, cross-repo coupling, change frequency, author concentration, "
+            "recency, Granger causal influence, and revert history. Use BEFORE changing critical "
+            "code to quantify the risk.\n\n"
+            "Returns per-module: risk level (CRITICAL/HIGH/MEDIUM/LOW), score, rank, key signals, "
+            "and human-readable reasons.\n\n"
+            "Examples: check_criticality(['Transaction']), check_criticality(['TenantConfig', 'PaymentFlows'])"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "modules": {
+                "type": "array", "items": {"type": "string"},
+                "description": "Module names to score."
+            },
+        }, "required": ["modules"]},
+    }},
+    {"type": "function", "function": {
+        "name": "get_guardrails",
+        "description": (
+            "Fetch auto-generated guardrail documents for critical modules. Each guardrail "
+            "explains: why this code is critical, what invariant must stay true, what breaks "
+            "if you change it, and who should review changes. If a module has no guardrail, "
+            "returns its criticality score with a note.\n\n"
+            "Use when reviewing or writing PRs that touch critical code — the guardrail tells "
+            "you what to preserve and what to test.\n\n"
+            "Examples: get_guardrails(['Transaction']), get_guardrails(['CardInfo', 'CryptoUtils'])"
+        ),
+        "parameters": {"type": "object", "properties": {
+            "modules": {
+                "type": "array", "items": {"type": "string"},
+                "description": "Module names to fetch guardrails for."
+            },
+        }, "required": ["modules"]},
+    }},
+    {"type": "function", "function": {
+        "name": "list_critical_modules",
+        "description": (
+            "List the most critical modules in the codebase, ranked by risk score. Works on "
+            "any codebase — no domain knowledge required. Use before major refactors, during "
+            "onboarding, or when planning code reviews.\n\n"
+            "Optional filter by service name. Default threshold 0.5 (moderately critical and up), "
+            "default top_k 20."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "service":   {"type": "string",  "description": "Filter by service name (e.g., 'euler-api-txns'). Optional."},
+            "threshold": {"type": "number",  "description": "Minimum criticality score (0-1). Default 0.5."},
+            "top_k":     {"type": "integer", "description": "Number of results to return. Default 20."},
+        }, "required": []},
+    }},
 ]
 
 
@@ -1069,6 +1144,29 @@ def _tool_guardian(mode: str, changed_files: list, min_confidence: float = 0.1) 
     return "Unknown guardian mode."
 
 
+def _delegate_to_mcp(tool_name: str, **kwargs) -> str:
+    """Call an MCP server tool function by name and return its formatted output.
+
+    Keeps the guardrails/criticality tools exposed from one place — the MCP
+    server module — so tools.py cannot silently drift from mcp_server.py.
+    Required for the App-Core Sync Invariant (OPERATING_PRINCIPLES.md).
+    """
+    try:
+        from serve import mcp_server as _mcp  # noqa: F401
+    except Exception as e:
+        return f"[{tool_name}] MCP server module not importable: {e!r}"
+    fn = getattr(_mcp, tool_name, None)
+    # FastMCP may wrap the decorated fn; if so, unwrap
+    if fn is not None and not callable(fn):
+        fn = getattr(fn, "fn", None) or getattr(fn, "func", None) or getattr(fn, "__wrapped__", None)
+    if not callable(fn):
+        return f"[{tool_name}] not exposed by serve.mcp_server"
+    try:
+        return str(fn(**kwargs))
+    except Exception as e:
+        return f"[{tool_name}] call failed: {e!r}"
+
+
 TOOL_DISPATCH: dict = {
     "get_function_body":     lambda a: tool_get_function_body(a.get("fn_id",""), a.get("reason","")),
     "trace_callees":         lambda a: tool_trace_callees(a.get("fn_id",""), a.get("reason","")),
@@ -1086,6 +1184,16 @@ TOOL_DISPATCH: dict = {
     # ── Guardian / PR analysis tools ──────────────────────────────────────────
     "predict_missing_changes": lambda a: _tool_guardian("predict", a.get("changed_files", []), a.get("min_confidence", 0.1)),
     "suggest_reviewers":       lambda a: _tool_guardian("reviewers", a.get("changed_files", [])),
+    # ── Guardrails / Criticality tools (delegated to MCP server implementations
+    #    so tools.py and mcp_server.py stay in sync; see OPERATING_PRINCIPLES.md
+    #    App-Core Sync Invariant) ────────────────────────────────────────────────
+    "check_my_changes":      lambda a: _delegate_to_mcp("check_my_changes",      changed_files=a.get("changed_files", [])),
+    "check_criticality":     lambda a: _delegate_to_mcp("check_criticality",     modules=a.get("modules", [])),
+    "get_guardrails":        lambda a: _delegate_to_mcp("get_guardrails",        modules=a.get("modules", [])),
+    "list_critical_modules": lambda a: _delegate_to_mcp("list_critical_modules",
+                                                        service=a.get("service"),
+                                                        threshold=a.get("threshold", 0.5),
+                                                        top_k=a.get("top_k", 20)),
     # ── HyperCode coding tools (available when _CODING_TOOLS_AVAILABLE) ───────
     "run_bash":   lambda a: (
         _run_bash(a.get("command",""), a.get("timeout"), None)
