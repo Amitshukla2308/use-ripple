@@ -10,46 +10,10 @@
     "subfolder": "serve"
   },
   "websiteUrl": "https://carlsbert.tunnelthemvp.in/journal/",
-  "packages": [
+  "remotes": [
     {
-      "registryType": "pypi",
-      "identifier": "hyperretrieval",
-      "version": "0.6.0",
-      "transport": {
-        "type": "sse",
-        "url": "http://127.0.0.1:8002/sse"
-      },
-      "environmentVariables": [
-        {
-          "name": "ARTIFACT_DIR",
-          "description": "Directory containing graph_with_summaries.json, vectors.lance, cochange_index.json, criticality_index.json, guardrails/",
-          "isRequired": true
-        },
-        {
-          "name": "EMBED_SERVER_URL",
-          "description": "URL of the embedding inference server (default: http://localhost:8001)",
-          "isRequired": false,
-          "default": "http://localhost:8001"
-        },
-        {
-          "name": "HR_RERANKER",
-          "description": "Cross-encoder reranker mode: 'bge' | 'noop' | '' (default: off)",
-          "isRequired": false
-        },
-        {
-          "name": "HR_PROVENANCE_BACKEND",
-          "description": "AI-code provenance backend: 'git-notes' | 'json' | 'off' (default: git-notes)",
-          "isRequired": false,
-          "default": "git-notes"
-        },
-        {
-          "name": "HR_GUARD_PATH",
-          "description": "Path to the Guard prototype for pattern checks (optional)",
-          "isRequired": false
-        }
-      ],
-      "runtimeHint": "uvicorn",
-      "packageArguments": []
+      "type": "sse",
+      "url": "http://127.0.0.1:8002/sse"
     }
   ],
   "_meta": {
@@ -63,12 +27,16 @@
         "AI-code provenance consumption (Git AI / Agent Blame / Tabnine)",
         "Compliance-ready: EU AI Act (Aug 2026), SOX, PCI-DSS"
       ],
-      "status": "ON HOLD — Amit directive 2026-04-17: not going to PyPI yet",
+      "status": "READY — Path A picked by Amit 2026-04-17. remotes[] entry points to SSE-over-localhost. Submission awaits final Amit OK.",
       "submission_blockers": [
-        "Amit directive 2026-04-17: no PyPI publication this session — the `packages[].registryType=pypi` path is off the table",
-        "Alternative path A: switch to `remotes` entry (local SSE at http://127.0.0.1:8002/sse) — registry surfaces HR but users clone+setup manually",
-        "Alternative path B: hold the manifest in-repo as reference; revisit once a different distribution story (Docker image, install script, npm wrapper) is picked",
-        "HR currently needs an ARTIFACT_DIR pre-built from build/ pipeline — whatever submission path, registry entry must surface this as a setup step"
+        "Amit's OK on pushing this manifest to the official MCP Registry. Validation passes the 2025-10-17 schema; all required fields present (name, description, version). Remotes entry uses SSE transport type per schema, URL is localhost — registry docs should accept per-user-install endpoints but we'll verify with their publish API before going live."
+      ],
+      "documented_env_vars_moved_here_because_remotes_has_no_environmentVariables_field": [
+        {"name": "ARTIFACT_DIR", "required": true, "description": "Directory containing graph_with_summaries.json, vectors.lance, cochange_index.json, criticality_index.json, guardrails/"},
+        {"name": "EMBED_SERVER_URL", "required": false, "default": "http://localhost:8001", "description": "URL of the embedding inference server"},
+        {"name": "HR_RERANKER", "required": false, "description": "Cross-encoder reranker mode: 'bge' | 'noop' | '' (default: off)"},
+        {"name": "HR_PROVENANCE_BACKEND", "required": false, "default": "git-notes", "description": "AI-code provenance backend: 'git-notes' | 'json' | 'off'"},
+        {"name": "HR_GUARD_PATH", "required": false, "description": "Path to the Guard prototype for pattern checks (optional)"}
       ],
       "license": "Apache-2.0 (already at repo root LICENSE — 190 lines, verified 2026-04-17)",
       "roadmap_to_submission": [
