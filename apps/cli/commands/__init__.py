@@ -5,7 +5,7 @@ All /commands are registered here and dispatched by hrcode.py.
 Each command handler receives (args_str, session, engine) and returns a string.
 
 Equivalent to codetoolcli's command system — 60+ commands ported and
-renamed for HyperRetrieval conventions.
+renamed for Ripple conventions.
 """
 from __future__ import annotations
 import os

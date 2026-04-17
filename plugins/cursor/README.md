@@ -1,4 +1,4 @@
-# HyperRetrieval — Cursor Plugin
+# Ripple — Cursor Plugin
 
 Code impact intelligence for every PR. Zero config.
 
@@ -10,7 +10,7 @@ Code impact intelligence for every PR. Zero config.
 
 ## How it works
 
-On workspace open, HyperRetrieval indexes your repo using git history only. No GPU, no cloud, no config. Analysis runs locally in seconds.
+On workspace open, Ripple indexes your repo using git history only. No GPU, no cloud, no config. Analysis runs locally in seconds.
 
 The plugin exposes 3 MCP tools that your AI assistant can use:
 - `get_blast_radius` — tiered impact analysis with confidence scores
@@ -19,19 +19,19 @@ The plugin exposes 3 MCP tools that your AI assistant can use:
 
 ## Install
 
-From Cursor Marketplace: search "HyperRetrieval"
+From Cursor Marketplace: search "Ripple"
 
 Or manually:
 ```bash
 # Clone the repo
-git clone https://github.com/amitshukla-stack/hyper-retrieval.git
+git clone https://github.com/amitshukla-stack/ripple.git
 
 # Add to .cursor/mcp.json
 {
   "mcpServers": {
-    "hyperretrieval": {
+    "ripple": {
       "command": "python3",
-      "args": ["path/to/hyper-retrieval/plugins/cursor/server.py"]
+      "args": ["path/to/ripple/plugins/cursor/server.py"]
     }
   }
 }

@@ -117,7 +117,7 @@ kw_allowlist:
 
 # Customization
 branding:
-  app_name: "HyperRetrieval"
+  app_name: "Ripple"
   tagline: "codebase intelligence"
 
 starters:

@@ -1,5 +1,5 @@
 """
-HyperRetrieval — Agentic codebase intelligence (Chainlit UI)
+Ripple — Agentic codebase intelligence (Chainlit UI)
 
 Clean ReAct architecture:
   - Single system prompt (no routing, no persona selection)
@@ -800,12 +800,12 @@ async def set_starters():
 async def _run_onboarding(username: str) -> None:
     """
     Interactive first-login onboarding flow.
-    Shows what HyperRetrieval can do, then lets the user pick a starter query or type their own.
+    Shows what Ripple can do, then lets the user pick a starter query or type their own.
     """
     # ── Step 1: Welcome ───────────────────────────────────────────────────────
     await cl.Message(content=(
         f"# Welcome, **{username}**! 👋\n\n"
-        "You're now connected to **HyperRetrieval** — a codebase intelligence agent "
+        "You're now connected to **Ripple** — a codebase intelligence agent "
         "with deep knowledge of your indexed codebase.\n\n"
         "It reads actual source code before answering — no hallucinations, no guessing.\n\n"
         "---\n\n"
@@ -1497,7 +1497,7 @@ async def on_message(message: cl.Message):
     # /status command
     if query.lower().startswith("/status"):
         lines = [
-            "**HyperRetrieval Status**",
+            "**Ripple Status**",
             f"- Graph: {RE.G.number_of_nodes():,} nodes, {RE.G.number_of_edges():,} edges",
             f"- Vectors: {RE.lance_tbl.count_rows():,} @ 4096d",
             f"- Module graph: {RE.MG.number_of_nodes():,} modules, {RE.MG.number_of_edges():,} edges",

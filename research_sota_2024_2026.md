@@ -1,6 +1,6 @@
 # State-of-the-Art Research: Code Intelligence & Codebase RAG (2024–2026)
 
-Compiled: 2026-03-22. Focus on findings directly applicable to HyperRetrieval architecture.
+Compiled: 2026-03-22. Focus on findings directly applicable to Ripple architecture.
 
 ---
 
@@ -15,7 +15,7 @@ The landscape has shifted toward large LLM-backbone embedders trained on code-sp
 - MTEB Code task score: **80.68** — highest reported across all publicly evaluated models
 - 8B parameters, 32K context, up to 4096-dim embeddings
 - Three-stage training: contrastive pre-training on weak supervision → supervised fine-tuning on labeled data → model merging
-- **Relevance to HyperRetrieval:** This is what you're running. The MTEB Code score confirms it is the correct choice for symbol-level retrieval at this scale.
+- **Relevance to Ripple:** This is what you're running. The MTEB Code score confirms it is the correct choice for symbol-level retrieval at this scale.
 
 **Nomic Embed Code** (7B, released March 2025, [announcement](https://www.nomic.ai/news/introducing-state-of-the-art-nomic-embed-code)):
 - Built on CoRNStack dataset (ICLR 2025 paper)
@@ -58,7 +58,7 @@ The landscape has shifted toward large LLM-backbone embedders trained on code-sp
 
 **CodeSearchNet**: Still widely used; 6 languages; Nomic Embed Code 7B currently top-performing open model.
 
-### Takeaway for HyperRetrieval
+### Takeaway for Ripple
 Qwen3-Embedding-8B is the correct production choice as of early 2026. If you need a lightweight cascade (fast first-stage + expensive re-rank), CodeRankEmbed (137M) → Qwen3-8B rerank is the pattern to follow.
 
 ---
@@ -81,7 +81,7 @@ Qwen3-Embedding-8B is the correct production choice as of early 2026. If you nee
 - Graph message-passing used for re-ranking retrieved candidates
 
 ### Community Detection for Code Graphs
-- Louvain (used in HyperRetrieval) remains practical but has known resolution-limit issues for large dense graphs
+- Louvain (used in Ripple) remains practical but has known resolution-limit issues for large dense graphs
 - **Leiden algorithm** (Traag et al. 2019, but gaining adoption in 2024–2025) fixes Louvain's disconnected community problem — produces strictly better-connected communities
 - Deep learning methods for community detection peaked in publications 2023–2024 ([survey, Frontiers AI 2025](https://www.frontiersin.org/journals/artificial-intelligence/articles/10.3389/frai.2025.1572645/full)) but are computationally prohibitive for symbol graphs of 94K nodes
 - **Practical recommendation:** Switch Louvain → Leiden for cluster summarization. Same interface (python-igraph / networkx-leiden), provably better output.
@@ -133,9 +133,9 @@ Qwen3-Embedding-8B is the correct production choice as of early 2026. If you nee
 ### ML-Based Approaches
 - No dominant ML model for co-change prediction has emerged yet as of early 2026
 - Graph Neural Networks on commit graphs are an active research direction but no production-ready system published
-- Practical state-of-the-art remains: **weighted co-occurrence + structural coupling** (what HyperRetrieval does), augmented with the ESEM 2024 fusion of structural edges
+- Practical state-of-the-art remains: **weighted co-occurrence + structural coupling** (what Ripple does), augmented with the ESEM 2024 fusion of structural edges
 
-### Recommendation for HyperRetrieval
+### Recommendation for Ripple
 Current co-change index (7,363 modules, 111,005 pairs) already captures co-occurrence. The gap is the lack of **structural coupling fallback** for modules with zero co-change history. Adding call-graph and import-graph edges as synthetic co-change pairs with lower weight (e.g., weight=0.1 vs observed co-change weight=1.0) would address cold-start.
 
 ---
@@ -159,7 +159,7 @@ Current co-change index (7,363 modules, 111,005 pairs) already captures co-occur
 | Multi-granularity (hierarchical) | Best recall | Complex index | Production systems |
 
 - **Hierarchical Code Graph Summarization showed 82% relative improvement** in retrieval precision in a 2025 study
-- Production recommendation: index at symbol level (what HyperRetrieval does) AND maintain file-level summaries as a coarser retrieval layer — confirmed as optimal by multiple 2024–2025 findings
+- Production recommendation: index at symbol level (what Ripple does) AND maintain file-level summaries as a coarser retrieval layer — confirmed as optimal by multiple 2024–2025 findings
 - An "Exploratory Study of Code Retrieval Techniques in Coding Agents" (Preprints.org, Oct 2025) found that content search + file-name search + structure search (LSP-level) at multiple granularities outperforms any single granularity
 
 ---
@@ -208,13 +208,13 @@ Embedding dimension is fixed at index build time. Switching models (e.g., Qwen3-
 
 **Inference-time scaling** (OpenHands Nov 2025): Run N trajectories in parallel, use a trained critic model to select the best. +5.8 points absolute over single trajectory. This is the current frontier.
 
-**Optimal tool call budget**: The SWE-Effi paper (arxiv:2509.09853) shows effectiveness degrades sharply beyond ~30 LLM calls for most scaffolds. HyperRetrieval's MAX_TOOL_CALLS=12 is aggressive but defensible for a retrieval assistant (not a full repair agent).
+**Optimal tool call budget**: The SWE-Effi paper (arxiv:2509.09853) shows effectiveness degrades sharply beyond ~30 LLM calls for most scaffolds. Ripple's MAX_TOOL_CALLS=12 is aggressive but defensible for a retrieval assistant (not a full repair agent).
 
 **ReAct loop structure that works**:
 1. Localize (2–3 calls): module search → symbol search → body fetch
 2. Understand (1–2 calls): trace callers/callees
 3. Answer or generate patch
-Total: 4–7 calls for well-scoped questions. Aligns with HyperRetrieval's "~5k tokens / 4–6 calls" guideline.
+Total: 4–7 calls for well-scoped questions. Aligns with Ripple's "~5k tokens / 4–6 calls" guideline.
 
 ---
 
@@ -236,7 +236,7 @@ Total: 4–7 calls for well-scoped questions. Aligns with HyperRetrieval's "~5k 
 - Up to **20× compression** with only 1.5% performance loss on reasoning tasks
 - LongLLMLingua specifically addresses lost-in-middle: compresses middle tokens more aggressively, preserving start/end
 - +21.4% accuracy boost on RAG tasks in controlled experiments
-- Practical for HyperRetrieval: compress retrieved function bodies before assembling context when total tokens > 8K
+- Practical for Ripple: compress retrieved function bodies before assembling context when total tokens > 8K
 
 **Multi-scale Positional Encoding (Ms-PoE)** (ICLR 2025):
 - Plug-and-play — no fine-tuning required
@@ -257,7 +257,7 @@ Query
 
 ---
 
-## Summary: Gaps in Current HyperRetrieval vs SOTA
+## Summary: Gaps in Current Ripple vs SOTA
 
 | Area | Current State | SOTA Gap | Priority |
 |---|---|---|---|

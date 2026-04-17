@@ -151,7 +151,7 @@ def cmd_model(args: str, session, engine) -> str:
 
 def cmd_mcp(args: str, session, engine) -> str:
     """
-    Manage the HyperRetrieval MCP server.
+    Manage the Ripple MCP server.
     /mcp status    → check if MCP server is running on port 8002
     /mcp start     → start the MCP server
     /mcp stop      → stop the MCP server
@@ -231,7 +231,7 @@ def cmd_version(args: str, session, engine) -> str:
     """Show HyperCode version and platform info."""
     import platform
     return (
-        "HyperCode — codebase intelligence CLI for HyperRetrieval\n"
+        "HyperCode — codebase intelligence CLI for Ripple\n"
         f"Python   : {platform.python_version()}\n"
         f"Platform : {platform.system()} {platform.release()}\n"
         f"Session  : {session.id}"

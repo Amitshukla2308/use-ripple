@@ -1,4 +1,4 @@
-name: HyperRetrieval Guardian
+name: Ripple Guardian
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  ARTIFACT_DIR: ${{ vars.HYPERRETRIEVAL_ARTIFACT_DIR || '.hyperretrieval/artifacts' }}
+  ARTIFACT_DIR: ${{ vars.HYPERRETRIEVAL_ARTIFACT_DIR || '.ripple/artifacts' }}
 
 jobs:
   guardian:
@@ -20,17 +20,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Checkout HyperRetrieval
-        if: ${{ github.repository != (vars.HYPERRETRIEVAL_REPO || 'amitshukla-stack/hyper-retrieval') }}
+      - name: Checkout Ripple
+        if: ${{ github.repository != (vars.HYPERRETRIEVAL_REPO || 'amitshukla-stack/ripple') }}
         uses: actions/checkout@v4
         with:
-          repository: ${{ vars.HYPERRETRIEVAL_REPO || 'amitshukla-stack/hyper-retrieval' }}
-          path: .hyperretrieval
+          repository: ${{ vars.HYPERRETRIEVAL_REPO || 'amitshukla-stack/ripple' }}
+          path: .ripple
           token: ${{ secrets.HYPERRETRIEVAL_TOKEN || github.token }}
 
       - name: Self-reference symlink
-        if: ${{ github.repository == (vars.HYPERRETRIEVAL_REPO || 'amitshukla-stack/hyper-retrieval') }}
-        run: ln -s "$GITHUB_WORKSPACE" .hyperretrieval
+        if: ${{ github.repository == (vars.HYPERRETRIEVAL_REPO || 'amitshukla-stack/ripple') }}
+        run: ln -s "$GITHUB_WORKSPACE" .ripple
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -66,7 +66,7 @@ jobs:
             RULES_ARG="--rules ${{ env.ARTIFACT_DIR }}/guardian_rules.yaml"
           fi
 
-          REPORT=$(python3 .hyperretrieval/apps/cli/pr_analyzer.py \
+          REPORT=$(python3 .ripple/apps/cli/pr_analyzer.py \
             --mode guardian \
             --artifact-dir "${{ env.ARTIFACT_DIR }}" \
             $RULES_ARG \
@@ -77,7 +77,7 @@ jobs:
           echo "$REPORT" > /tmp/guardian_report.md
 
           # Also generate JSON for machine parsing
-          python3 .hyperretrieval/apps/cli/pr_analyzer.py \
+          python3 .ripple/apps/cli/pr_analyzer.py \
             --mode guardian \
             --format json \
             --artifact-dir "${{ env.ARTIFACT_DIR }}" \
@@ -96,7 +96,7 @@ jobs:
               return;
             }
 
-            const body = `### HyperRetrieval Guardian\n\n${report}\n\n---\n_Powered by [HyperRetrieval](https://github.com/amitshukla-stack/hyper-retrieval) Guardian Mode_`;
+            const body = `### Ripple Guardian\n\n${report}\n\n---\n_Powered by [Ripple](https://github.com/amitshukla-stack/ripple) Guardian Mode_`;
 
             // Find existing Guardian comment to update (avoid spam)
             const { data: comments } = await github.rest.issues.listComments({
@@ -106,7 +106,7 @@ jobs:
             });
 
             const existing = comments.find(c =>
-              c.body.includes('HyperRetrieval Guardian') &&
+              c.body.includes('Ripple Guardian') &&
               c.user.type === 'Bot'
             );
 

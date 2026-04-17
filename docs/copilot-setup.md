@@ -1,10 +1,10 @@
-# HyperRetrieval + GitHub Copilot Agent Mode
+# Ripple + GitHub Copilot Agent Mode
 
-Use HyperRetrieval's 12 MCP tools inside GitHub Copilot's Agent Mode for deep codebase intelligence — blast radius, change prediction, code search, and more.
+Use Ripple's 12 MCP tools inside GitHub Copilot's Agent Mode for deep codebase intelligence — blast radius, change prediction, code search, and more.
 
 ## Prerequisites
 
-1. HyperRetrieval MCP server running:
+1. Ripple MCP server running:
    ```bash
    cd serve && python mcp_server.py  # starts on port 8002
    ```
@@ -18,7 +18,7 @@ Create `.vscode/mcp.json` in your project root:
 ```json
 {
   "servers": {
-    "hyperretrieval": {
+    "ripple": {
       "type": "sse",
       "url": "http://127.0.0.1:8002/sse"
     }
@@ -26,13 +26,13 @@ Create `.vscode/mcp.json` in your project root:
 }
 ```
 
-That's it. Open Copilot Chat, select **Agent** mode, and HyperRetrieval's tools are available.
+That's it. Open Copilot Chat, select **Agent** mode, and Ripple's tools are available.
 
 ## Setup (JetBrains)
 
 In Settings > Tools > AI Assistant > MCP Servers, add:
 
-- **Name**: hyperretrieval
+- **Name**: ripple
 - **Type**: SSE
 - **URL**: `http://127.0.0.1:8002/sse`
 
@@ -41,7 +41,7 @@ In Settings > Tools > AI Assistant > MCP Servers, add:
 Already configured via `.mcp.json` in the project root:
 
 ```json
-{"mcpServers": {"hyperretrieval": {"type": "sse", "url": "http://127.0.0.1:8002/sse"}}}
+{"mcpServers": {"ripple": {"type": "sse", "url": "http://127.0.0.1:8002/sse"}}}
 ```
 
 ## Available Tools
@@ -70,13 +70,13 @@ Already configured via `.mcp.json` in the project root:
 
 ## Remote Access
 
-If HyperRetrieval runs on a different machine (e.g., a build server), replace `127.0.0.1` with the server's address. The MCP server supports any HTTP client — no special authentication required.
+If Ripple runs on a different machine (e.g., a build server), replace `127.0.0.1` with the server's address. The MCP server supports any HTTP client — no special authentication required.
 
 For Cloudflare Tunnel setups:
 ```json
 {
   "servers": {
-    "hyperretrieval": {
+    "ripple": {
       "type": "sse",
       "url": "https://hr.your-domain.com/sse"
     }

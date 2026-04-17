@@ -1,6 +1,6 @@
 """Thin integration layer between HR's check_my_changes and the Guard checker.
 
-Guard ships bundled with HR at `hyperretrieval/guardrails/comment_code_checker.py`.
+Guard ships bundled with HR at `ripple/guardrails/comment_code_checker.py`.
 This module loads it by default so installed users get Guard out of the box. For
 development, set `HR_GUARD_PATH` to override with a local prototype checkout
 (typically `~/lab/experiments/guardrails_prototype/`).
@@ -17,7 +17,7 @@ Public API:
 Env vars:
     HR_GUARD_PATH    - directory containing `comment_code_checker.py`.
                        When set, used verbatim. When unset, falls back to the
-                       bundled `hyperretrieval/guardrails/` checker.
+                       bundled `ripple/guardrails/` checker.
     HR_GUARD_DISABLE - set to "1" to disable Guard entirely
 """
 from __future__ import annotations

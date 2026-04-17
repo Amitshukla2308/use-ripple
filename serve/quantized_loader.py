@@ -1,5 +1,5 @@
 """
-Quantized vector search backend for HyperRetrieval.
+Quantized vector search backend for Ripple.
 
 Loads TurboQuant-compressed vectors from vectors_quantized.npz,
 reconstructs them, and provides a LanceDB-compatible search interface.

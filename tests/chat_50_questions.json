@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "description": "50-question evaluation suite for HyperRetrieval chat app",
+  "description": "50-question evaluation suite for Ripple chat app",
   "questions": [
     {
       "id": 1,

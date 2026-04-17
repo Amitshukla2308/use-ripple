@@ -1,5 +1,5 @@
 """
-mcp_server.py — HyperRetrieval MCP server
+mcp_server.py — Ripple MCP server
 
 Exposes codebase intelligence as 8 MCP tools.
 
@@ -52,7 +52,7 @@ _args, _ = _parser.parse_known_args()
 
 MCP_PORT = _args.port
 mcp = FastMCP(
-    "hyperretrieval",
+    "ripple",
     host="127.0.0.1",
     port=MCP_PORT,
     sse_path="/sse",
@@ -765,6 +765,26 @@ def list_critical_modules(
         lines.append(f"| #{m.get('rank', '?')} | {mod_short} | {m['score']:.3f} | {m['risk_level']} | {gr} |")
 
     return "\n".join(lines)
+
+
+@mcp.tool()
+def fast_search(query: str, top_k: int = 10) -> str:
+    """
+    Zero-GPU keyword search: BM25 + IDF graph index, no embed server required.
+
+    Use this when:
+    - The embed server is not running (keyword-only or offline deployments)
+    - You have an exact function/class/module name to look up
+    - You need a sub-50ms result without semantic search overhead
+
+    For natural-language or conceptual queries, use search_symbols instead —
+    it adds vector search and co-change expansion for higher recall.
+
+    Args:
+        query:  Symbol name, module keyword, or exact identifier
+        top_k:  Max results per service (default 10)
+    """
+    return T.tool_fast_search(query, top_k)
 
 
 @mcp.tool()
