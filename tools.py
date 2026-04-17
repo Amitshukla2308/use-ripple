@@ -433,6 +433,21 @@ AGENT_TOOLS = [
             }
         }, "required": ["changed_files"]}
     }},
+    {"type": "function", "function": {
+        "name": "score_change_risk",
+        "description": (
+            "Compute a composite risk score (0-100) for a set of changed files/modules.\n\n"
+            "Combines blast radius, coverage gap, reviewer concentration, and service spread "
+            "into one actionable number with a LOW/MEDIUM/HIGH/CRITICAL verdict.\n\n"
+            "Use to gate PRs in CI/CD or prioritize review effort."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "changed_files": {
+                "type": "array", "items": {"type": "string"},
+                "description": "List of changed file paths or module names."
+            }
+        }, "required": ["changed_files"]}
+    }},
     # ── HyperCode coding tools ────────────────────────────────────────────────
     # Enabled when apps/cli/tools/ is importable (_CODING_TOOLS_AVAILABLE = True).
     # These allow the Chainlit chat + MCP server to read/write/edit files and run
@@ -1184,6 +1199,7 @@ TOOL_DISPATCH: dict = {
     # ── Guardian / PR analysis tools ──────────────────────────────────────────
     "predict_missing_changes": lambda a: _tool_guardian("predict", a.get("changed_files", []), a.get("min_confidence", 0.1)),
     "suggest_reviewers":       lambda a: _tool_guardian("reviewers", a.get("changed_files", [])),
+    "score_change_risk":       lambda a: _tool_guardian("risk", a.get("changed_files", [])),
     # ── Guardrails / Criticality tools (delegated to MCP server implementations
     #    so tools.py and mcp_server.py stay in sync; see OPERATING_PRINCIPLES.md
     #    App-Core Sync Invariant) ────────────────────────────────────────────────
