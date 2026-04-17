@@ -66,16 +66,15 @@
       "status": "DRAFT — do not submit yet",
       "submission_blockers": [
         "pip package 'hyperretrieval' not yet on PyPI — packages[].registryType=pypi presumes it exists",
-        "No public OSS license file at Amitshukla2308/Index-the-code yet (schema requires for broader discovery)",
         "HR currently needs an ARTIFACT_DIR pre-built from build/ pipeline — registry should surface this as a setup step, not a silent failure",
         "Amit's OK on external submission (inverted permission list requires no-OK, but this touches personal-account repo visibility)"
       ],
+      "license": "Apache-2.0 (already at repo root LICENSE — 190 lines, verified 2026-04-17)",
       "roadmap_to_submission": [
         "1. Package HR as `pip install hyperretrieval` (pyproject.toml exists, need PyPI token)",
-        "2. Ship LICENSE file (MIT recommended for broadest adoption)",
-        "3. Add `hr-serve` CLI entrypoint that starts both embed + mcp servers with one command",
-        "4. Ship a tiny 'demo_artifact/' in the pip package so first-run doesn't need build/ pipeline",
-        "5. Submit to official MCP Registry via the publish API at registry.modelcontextprotocol.io"
+        "2. Add `hr-serve` CLI entrypoint that starts both embed + mcp servers with one command",
+        "3. Ship a tiny 'demo_artifact/' in the pip package so first-run doesn't need build/ pipeline",
+        "4. Submit to official MCP Registry via the publish API at registry.modelcontextprotocol.io"
       ]
     }
   }
