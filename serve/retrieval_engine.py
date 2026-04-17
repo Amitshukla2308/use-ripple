@@ -1910,6 +1910,13 @@ def unified_search(queries: list, k_total: int = 250) -> dict:
     # Criticality-aware rerank: boost modules that are risk-scored high
     merged = _apply_criticality_boost(merged)
 
+    # Cross-encoder rerank (off by default; HR_RERANKER=bge to enable)
+    try:
+        from serve.reranker import apply_reranker as _apply_reranker
+        merged = _apply_reranker(queries[0] if queries else "", merged)
+    except Exception as _e:
+        print(f"[unified_search] reranker skipped: {_e!r}")
+
     # Apply per-service cap based on traffic_weight
     if SERVICE_PROFILES:
         capped: dict = {}
