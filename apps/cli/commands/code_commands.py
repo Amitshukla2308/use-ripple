@@ -6,6 +6,8 @@ All use the engine's ReAct loop with appropriate system context.
 """
 from __future__ import annotations
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 
@@ -126,8 +128,10 @@ def cmd_test(args: str, session, engine) -> str:
         if markers[0] is None or any(
             os.path.exists(os.path.join(cwd, m)) for m in markers if m
         ):
+            # 🛡️ Sentinel: Sanitize shell command by parsing into list arguments
+            cmd_list = shlex.split(runner_cmd)
             result = subprocess.run(
-                runner_cmd, shell=True, capture_output=True, text=True,
+                cmd_list, capture_output=True, text=True,
                 cwd=cwd, timeout=300,
             )
             out = (result.stdout + result.stderr).strip()
@@ -213,10 +217,12 @@ def cmd_lint(args: str, session, engine) -> str:
     for linter in (f"ruff check {target}", f"flake8 {target}",
                    f"pylint {target}", f"biome check {target}"):
         tool = linter.split()[0]
-        if subprocess.run(f"which {tool}", shell=True,
-                          capture_output=True).returncode == 0:
+        # 🛡️ Sentinel: Safe executable path resolution
+        if shutil.which(tool) is not None:
+            # 🛡️ Sentinel: Sanitize shell command by parsing into list arguments
+            cmd_list = shlex.split(linter)
             result = subprocess.run(
-                linter, shell=True, capture_output=True, text=True, cwd=cwd)
+                cmd_list, capture_output=True, text=True, cwd=cwd)
             return (result.stdout + result.stderr).strip() or "No issues found."
 
     return "No linter found. Install ruff: pip install ruff"

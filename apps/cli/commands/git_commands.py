@@ -5,13 +5,16 @@ Ported from codetoolcli: commit, commit-push, push, diff, review-pr, pr.
 Uses the engine for LLM-assisted commit messages and PR reviews.
 """
 from __future__ import annotations
+import shlex
 import subprocess
 import sys
 
 
 def _git(args: str, cwd: str = None) -> str:
+    # 🛡️ Sentinel: Sanitize shell command by parsing into list arguments
+    cmd_list = ["git"] + shlex.split(args)
     result = subprocess.run(
-        f"git {args}", shell=True, capture_output=True, text=True,
+        cmd_list, capture_output=True, text=True,
         cwd=cwd or ".",
     )
     return (result.stdout + result.stderr).strip()

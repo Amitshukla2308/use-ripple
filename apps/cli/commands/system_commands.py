@@ -6,6 +6,8 @@ Ported from codetoolcli: help, doctor, config, mcp, model.
 from __future__ import annotations
 import os
 import pathlib
+import shlex
+import shutil
 import subprocess
 import sys
 
@@ -78,8 +80,8 @@ def cmd_doctor(args: str, session, engine) -> str:
 
     # Tools
     for tool in ("rg", "git", "pytest", "bun"):
-        found = subprocess.run(f"which {tool}", shell=True,
-                               capture_output=True).returncode == 0
+        # 🛡️ Sentinel: Safe executable path resolution
+        found = shutil.which(tool) is not None
         checks.append(f"  {tool:<12}  : {'✓' if found else '○ optional'}")
 
     # ARTIFACT_DIR
@@ -190,8 +192,8 @@ def cmd_mcp(args: str, session, engine) -> str:
                "MCP server may not have started. Check ~/mcp_server.log"
 
     elif sub == "stop":
-        result = subprocess.run("fuser -k 8002/tcp", shell=True,
-                                capture_output=True, text=True)
+        # 🛡️ Sentinel: Sanitize shell command by providing list without shell=True
+        result = subprocess.run(["fuser", "-k", "8002/tcp"], capture_output=True, text=True)
         return "MCP server stopped." if result.returncode == 0 else \
                "Could not stop MCP server (may not be running)."
 
