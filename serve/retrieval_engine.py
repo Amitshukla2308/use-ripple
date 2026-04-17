@@ -1095,7 +1095,32 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
                 tiered[mod]["signals"]["granger"] = granger_info
 
     tiered_list = sorted(tiered.values(), key=lambda x: -x["confidence"])
-    # ── End tiered impact ───────────────────────────────────────────────
+
+    # ── Severity tiering (T-017 finding) ───────────────────────────────
+    # HIGH   = cross-service causal signal → always cross-team (97.7% cross-owner)
+    # MEDIUM = intra-service structural/causal → mostly technical, 9.1% same-owner
+    # INFO   = co-change only, no causal signal → informational
+    seed_services = set()
+    if MG is not None:
+        for s in seed:
+            if s in MG.nodes:
+                svc = MG.nodes[s].get("service", "")
+                if svc:
+                    seed_services.add(svc)
+
+    severity_counts = {"HIGH": 0, "MEDIUM": 0, "INFO": 0}
+    for item in tiered_list:
+        svc = item.get("service", "")
+        has_causal = "granger" in item.get("signals", {})
+        is_cross_service = bool(svc and seed_services and svc not in seed_services)
+        if is_cross_service:
+            item["severity"] = "HIGH"
+        elif has_causal or item["tier"] in ("will_break", "may_break"):
+            item["severity"] = "MEDIUM"
+        else:
+            item["severity"] = "INFO"
+        severity_counts[item["severity"]] += 1
+    # ── End severity tiering ────────────────────────────────────────────
 
     # ── Community context (if available) ────────────────────────────────
     community_context = None
@@ -1133,6 +1158,7 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
         "cochange_neighbors": cochange_neighbors,
         "affected_services":  sorted(affected_services),
         "tiered_impact":      tiered_list,
+        "severity_summary":   severity_counts,
     }
     if community_context:
         result["community_context"] = community_context
