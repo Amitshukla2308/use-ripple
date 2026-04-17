@@ -1828,6 +1828,58 @@ def _cochange_expand(seed_results: dict, top_seed: int = 5,
     return dict(results)
 
 
+def _node_crit_score(node: dict) -> float:
+    """Look up criticality score for a result node. Tries several key paths."""
+    if not criticality_index:
+        return 0.0
+    # Candidate keys to try against criticality_index
+    candidates = []
+    for field in ("module", "name", "id"):
+        v = node.get(field)
+        if v:
+            candidates.append(v)
+            # _resolve_cc handles MG dot-format → cochange ::format
+            try:
+                rv = _resolve_cc(v)
+                if rv != v:
+                    candidates.append(rv)
+            except Exception:
+                pass
+    for key in candidates:
+        entry = criticality_index.get(key)
+        if entry:
+            return float(entry.get("score", 0.0))
+    return 0.0
+
+
+def _apply_criticality_boost(merged: dict) -> dict:
+    """Rerank RRF results by (rrf_score * (1 + alpha * criticality_score)).
+
+    Controlled by env: HR_CRITICALITY_BOOST (default "1"), HR_CRIT_ALPHA (default "0.5").
+    No-op if the index is empty. Preserves node ordering within each service bucket
+    by the new boosted score, and stamps `_crit_score` / `_rrf_boosted` on each node.
+    """
+    if not criticality_index or os.environ.get("HR_CRITICALITY_BOOST", "1") == "0":
+        return merged
+    try:
+        alpha = float(os.environ.get("HR_CRIT_ALPHA", "0.5"))
+    except ValueError:
+        alpha = 0.5
+
+    boosted: dict = {}
+    for svc, nodes in merged.items():
+        rescored = []
+        for node in nodes:
+            rrf = float(node.get("_rrf_score", 0.0))
+            crit = _node_crit_score(node)
+            boost = rrf * (1.0 + alpha * crit)
+            new_node = {**node, "_crit_score": crit, "_rrf_boosted": boost}
+            rescored.append(new_node)
+        rescored.sort(key=lambda n: -n.get("_rrf_boosted", 0.0))
+        boosted[svc] = rescored
+    return boosted
+
+
 def unified_search(queries: list, k_total: int = 250) -> dict:
     """
     Primary search entry point. Fuses dense vector + BM25 + co-change via RRF.
@@ -1854,6 +1906,9 @@ def unified_search(queries: list, k_total: int = 250) -> dict:
         cochange_results = _cochange_expand(merged)
         if cochange_results:
             merged = rrf_merge(merged, cochange_results)
+
+    # Criticality-aware rerank: boost modules that are risk-scored high
+    merged = _apply_criticality_boost(merged)
 
     # Apply per-service cap based on traffic_weight
     if SERVICE_PROFILES:
