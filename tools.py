@@ -351,6 +351,24 @@ AGENT_TOOLS = [
         }, "required": ["query"]}
     }},
     {"type": "function", "function": {
+        "name": "get_why_context",
+        "description": (
+            "Returns WHY context for a module or symbol: ownership history, activity trend, "
+            "Granger causal direction, criticality reasons, and anti-pattern flags.\n\n"
+            "Use this BEFORE modifying critical code to understand:\n"
+            "- Who owns this code and how often it changes\n"
+            "- What causal relationships exist (this module predicts changes elsewhere)\n"
+            "- Why the criticality score is what it is\n"
+            "- Whether anti-patterns (god module, high churn, tight coupling) are present\n\n"
+            "Companion to get_blast_radius (what breaks) — this answers what motivates "
+            "the code and who to consult. Best called after search_symbols identifies "
+            "the exact module name."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "symbol_name": {"type": "string", "description": "Fully-qualified module or symbol name (e.g. 'euler-api-gateway::PaymentRouter' or 'PaymentGateway.Router')"}
+        }, "required": ["symbol_name"]}
+    }},
+    {"type": "function", "function": {
         "name": "search_modules",
         "description": (
             "Search module namespaces by keyword. Returns module paths you can pass to get_module.\n\n"
@@ -867,6 +885,53 @@ def tool_fast_search(query: str, top_k: int = 10) -> str:
     return "\n".join(lines)
 
 
+def tool_get_why_context(symbol_name: str) -> str:
+    """WHY context: ownership, activity trend, Granger causality, anti-patterns."""
+    data = RE.get_why_context(symbol_name)
+    if not data["found"]:
+        return (f"No context found for '{symbol_name}'. "
+                "Try search_symbols first to confirm the exact module name.")
+    lines = [f"WHY CONTEXT: {symbol_name}"]
+
+    if data["summary"]:
+        lines.append(f"\nSummary: {data['summary']}")
+
+    if data["owners"]:
+        lines.append("\nOwners:")
+        for o in data["owners"]:
+            lines.append(f"  {o['name']} <{o['email']}> — {o['commits']} commits")
+
+    if data["activity"]:
+        act = data["activity"]
+        lines.append(
+            f"\nActivity: score={act['score']}  trend={act['trend']}"
+            f"  (recent-50={act['recent_50']}, recent-200={act['recent_200']})"
+        )
+
+    if data["criticality"] and data["criticality"].get("score", 0) > 0:
+        crit = data["criticality"]
+        lines.append(f"\nCriticality: {crit['score']:.3f} (rank #{crit.get('rank', '?')})")
+        for r in crit.get("reasons", []):
+            lines.append(f"  - {r}")
+
+    if data["causal_outputs"]:
+        lines.append(f"\nCausal outputs — changes here predict changes in:")
+        for c in data["causal_outputs"]:
+            lines.append(f"  → {c['target']}  lag={c['lag_days']}d  p={c['p_value']}  [{c['strength']}]")
+
+    if data["causal_inputs"]:
+        lines.append(f"\nCausal inputs — changes here are predicted by:")
+        for c in data["causal_inputs"]:
+            lines.append(f"  ← {c['source']}  lag={c['lag_days']}d  p={c['p_value']}  [{c['strength']}]")
+
+    if data["anti_patterns"]:
+        lines.append("\nAnti-patterns detected:")
+        for ap in data["anti_patterns"]:
+            lines.append(f"  ⚠  {ap}")
+
+    return "\n".join(lines)
+
+
 def tool_search_modules(query: str, service: str = "") -> str:
     """
     Search module namespaces by keyword. Returns matching module paths that can
@@ -1221,6 +1286,7 @@ TOOL_DISPATCH: dict = {
     "trace_callers":         lambda a: tool_trace_callers(a.get("fn_id",""), a.get("reason","")),
     "get_log_patterns":      lambda a: tool_get_log_patterns(a.get("fn_id","")),
     "fast_search":           lambda a: tool_fast_search(a.get("query",""), int(a.get("top_k", 10))),
+    "get_why_context":       lambda a: tool_get_why_context(a.get("symbol_name","")),
     "search_symbols":        lambda a: tool_search_symbols(a.get("query",""), a.get("service",""), a.get("brief", False)),
     "search_modules":        lambda a: tool_search_modules(a.get("query",""), a.get("service","")),
     "get_module":            lambda a: tool_get_module(a.get("module_name",""), a.get("service",""), a.get("max_symbols", 30)),

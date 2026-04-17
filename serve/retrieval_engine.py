@@ -1625,6 +1625,126 @@ def list_critical_modules(service: str = None, threshold: float = 0.5, top_k: in
     }
 
 
+def get_why_context(symbol_name: str) -> dict:
+    """Return 'why' context for a module: ownership, activity trend, Granger causal
+    relationships, criticality reasons, and anti-pattern flags.
+
+    Answers WHY code is the way it is — ownership, change motivation, causal direction.
+    Companion to get_blast_radius (what breaks) — use both before touching critical code.
+    """
+    result: dict = {
+        "symbol": symbol_name,
+        "found": False,
+        "summary": None,
+        "owners": [],
+        "activity": {},
+        "criticality": {},
+        "causal_outputs": [],
+        "causal_inputs": [],
+        "anti_patterns": [],
+    }
+
+    cc_key = _resolve_cc(symbol_name)
+    mg_key = _resolve_mg(cc_key)
+
+    # Graph node summary
+    if MG is not None:
+        for candidate in [symbol_name, mg_key]:
+            if candidate in MG.nodes:
+                node = MG.nodes[candidate]
+                summary = node.get("summary") or node.get("docstring") or node.get("description")
+                if summary:
+                    result["summary"] = summary[:400]
+                    result["found"] = True
+                    break
+
+    # Ownership
+    owners = (ownership_index.get(symbol_name)
+              or ownership_index.get(mg_key)
+              or ownership_index.get(cc_key))
+    if owners:
+        result["found"] = True
+        result["owners"] = [
+            {"name": o.get("name", ""), "email": o.get("email", ""), "commits": o.get("commits", 0)}
+            for o in owners[:3]
+        ]
+
+    # Activity trend
+    act = activity_index.get(symbol_name) or activity_index.get(mg_key)
+    if act:
+        result["found"] = True
+        a50, a200 = act.get("activity_50", 0), act.get("activity_200", 0)
+        trend = ("accelerating" if a50 > a200 * 1.2
+                 else "decelerating" if a50 < a200 * 0.8
+                 else "stable")
+        result["activity"] = {
+            "score": round(act.get("activity_score", 0), 3),
+            "recent_50": round(a50, 3),
+            "recent_200": round(a200, 3),
+            "trend": trend,
+        }
+
+    # Criticality reasons
+    crit = criticality_index.get(symbol_name) or criticality_index.get(mg_key)
+    if crit:
+        result["found"] = True
+        result["criticality"] = {
+            "score": round(crit.get("score", 0), 3),
+            "rank": crit.get("rank"),
+            "reasons": crit.get("reasons", [])[:5],
+        }
+
+    # Granger causal pairs: O(n) scan — 16K pairs, fast enough
+    if granger_index:
+        for key, g in granger_index.items():
+            src, tgt = key.split("→")
+            is_src = cc_key in src or (symbol_name != cc_key and symbol_name in src)
+            is_tgt = cc_key in tgt or (symbol_name != cc_key and symbol_name in tgt)
+            if is_src and not is_tgt:
+                result["causal_outputs"].append({
+                    "target": _resolve_mg(tgt),
+                    "lag_days": g.get("best_lag"),
+                    "p_value": round(g.get("p_value", 1.0), 4),
+                    "strength": "strong" if g.get("p_value", 1) < 0.01 else "moderate",
+                })
+            elif is_tgt and not is_src:
+                result["causal_inputs"].append({
+                    "source": _resolve_mg(src),
+                    "lag_days": g.get("best_lag"),
+                    "p_value": round(g.get("p_value", 1.0), 4),
+                    "strength": "strong" if g.get("p_value", 1) < 0.01 else "moderate",
+                })
+        result["causal_outputs"] = sorted(result["causal_outputs"], key=lambda x: x["p_value"])[:5]
+        result["causal_inputs"]  = sorted(result["causal_inputs"],  key=lambda x: x["p_value"])[:5]
+        if result["causal_outputs"] or result["causal_inputs"]:
+            result["found"] = True
+
+    # Anti-pattern detection
+    anti: list = []
+    act_score  = result["activity"].get("score", 0)
+    crit_score = result["criticality"].get("score", 0)
+    n_out = len(result["causal_outputs"])
+    n_in  = len(result["causal_inputs"])
+    if act_score > 0.7 and crit_score < 0.3:
+        anti.append(
+            "HIGH_CHURN_LOW_IMPACT: Frequently changed but low criticality — "
+            "possible refactoring target or scope creep."
+        )
+    if crit_score >= 0.6 and n_out >= 4:
+        anti.append(
+            f"GOD_MODULE: Criticality {crit_score:.2f} + {n_out} causal outputs — "
+            "changes here ripple everywhere. Needs guardrail."
+        )
+    if n_in >= 4:
+        anti.append(
+            f"HIGHLY_COUPLED_DOWNSTREAM: {n_in} modules causally predict changes here — "
+            "this code is reactive. Consider stabilising its interface."
+        )
+    result["anti_patterns"] = anti
+
+    return result
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # BM25  (exact-match complement to dense vector search)
 # ════════════════════════════════════════════════════════════════════════════

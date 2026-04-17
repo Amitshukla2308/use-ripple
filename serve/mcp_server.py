@@ -788,6 +788,26 @@ def fast_search(query: str, top_k: int = 10) -> str:
 
 
 @mcp.tool()
+def get_why_context(symbol_name: str) -> str:
+    """
+    WHY context for a module or symbol: ownership, activity trend, Granger causal
+    direction, criticality reasons, and anti-pattern flags.
+
+    Use this BEFORE modifying critical code to understand who owns it, how often it
+    changes, what it causally predicts in the codebase, and whether structural
+    anti-patterns (god module, high churn, tight coupling) are present.
+
+    Companion to get_blast_radius — that answers 'what breaks', this answers 'why
+    is it this way and who should you talk to'.
+
+    Args:
+        symbol_name: Fully-qualified module or symbol name (e.g. 'PaymentGateway.Router'
+                     or 'euler-api-gateway::PaymentRouter')
+    """
+    return T.tool_get_why_context(symbol_name)
+
+
+@mcp.tool()
 def get_context(
     query: str,
     persona: str = "default",
