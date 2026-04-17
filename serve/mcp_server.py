@@ -439,8 +439,19 @@ def check_my_changes(changed_files: list[str]) -> str:
     sec_flagged = [m for m in all_affected
                    if any(kw in m.lower() for kw in _sec_kw)]
 
-    # Determine verdict
-    if coverage < 0.5 and len(predictions) >= 3:
+    # Guard: run local-file static guardrail checks if any changed_files are real paths
+    try:
+        from serve.guard_integration import run_guard_on_files, summarize_findings
+        guard_findings = run_guard_on_files(changed_files)
+        guard_summary = summarize_findings(guard_findings)
+    except Exception as _e:
+        print(f"[check_my_changes] guard skipped: {_e!r}")
+        guard_findings, guard_summary = [], {"count": 0, "critical": 0, "warning": 0, "patterns": []}
+
+    # Determine verdict (Guard CRITICAL escalates to FAIL; WARNING nudges toward WARN)
+    if guard_summary.get("critical", 0) > 0:
+        status, reason = "FAIL", f"Guard: {guard_summary['critical']} CRITICAL finding(s) — {', '.join(guard_summary['patterns'][:3])}"
+    elif coverage < 0.5 and len(predictions) >= 3:
         status, reason = "FAIL", f"PR completeness {coverage:.0%} with {len(predictions)} likely-missing files"
     elif sec_flagged:
         status, reason = "WARN", f"{len(sec_flagged)} security-sensitive module(s) touched"
@@ -448,6 +459,8 @@ def check_my_changes(changed_files: list[str]) -> str:
         status, reason = "WARN", f"PR completeness {coverage:.0%} -- review suggested"
     elif n_services > 3:
         status, reason = "WARN", f"Blast radius spans {n_services} services"
+    elif guard_summary.get("warning", 0) > 0:
+        status, reason = "WARN", f"Guard: {guard_summary['warning']} warning(s) — {', '.join(guard_summary['patterns'][:3])}"
     else:
         status, reason = "PASS", f"PR completeness {coverage:.0%}, blast radius contained"
 
@@ -475,6 +488,13 @@ def check_my_changes(changed_files: list[str]) -> str:
         lines.append("\n### Security Review Needed")
         for m in sec_flagged[:5]:
             lines.append(f"  - `{m}`")
+
+    if guard_findings:
+        lines.append(f"\n### Guard Findings ({guard_summary['count']} total, {guard_summary['critical']} CRITICAL)")
+        for f in guard_findings[:8]:
+            sev = f.get("severity", "WARNING")
+            emoji = "🔴" if sev.upper() == "CRITICAL" else "🟡"
+            lines.append(f"  {emoji} **{f.get('pattern', '?')}** `{f.get('file', '?')}:{f.get('line', 0)}` — {f.get('message', '')}")
 
     # Suggested reviewers
     rev_data = RE.suggest_reviewers(changed_mods, top_k=3)
