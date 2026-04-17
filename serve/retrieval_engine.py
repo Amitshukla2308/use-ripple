@@ -1865,6 +1865,24 @@ def fast_search_reranked(query: str, top_k: int = 10) -> dict:
     if not flat:
         return bm25
 
+    # Confidence gate: skip reranking when BM25 scores are uniform (BM25 already unambiguous).
+    # Relative spread = (max - median) / max. Low spread → top results are all equally scored
+    # → reranker risks demoting exact-name matches in favour of body-matched results.
+    # Threshold 0.30 derived from empirical calibration on 7-query benchmark (2026-04-17):
+    # spread < 0.30 correlated with neutral/harmful reranking; ≥ 0.30 with genuine gains.
+    _bm25_scores = sorted([n.get("_bm25_score", 0) for n in flat], reverse=True)
+    _max_s = _bm25_scores[0] if _bm25_scores else 0
+    _med_s = _bm25_scores[len(_bm25_scores) // 2] if _bm25_scores else 0
+    _spread = (_max_s - _med_s) / _max_s if _max_s > 0 else 0
+    _RERANK_THRESHOLD = 0.30
+    if _spread < _RERANK_THRESHOLD:
+        # BM25 is confident — reranking adds risk without reward; return top-k by BM25 score
+        flat_sorted = sorted(flat, key=lambda x: -x.get("_bm25_score", 0))[:top_k]
+        result: dict = defaultdict(list)
+        for node in flat_sorted:
+            result[node.get("service", "unknown")].append(node)
+        return dict(result)
+
     # Build (query, context) pairs — strip dots so tokenizer sees words, not hierarchy
     pairs = []
     for node in flat:
