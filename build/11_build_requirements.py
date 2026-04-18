@@ -13,7 +13,8 @@ Usage:
   python3 build/11_build_requirements.py [--dry-run] [--limit N]
 """
 
-import argparse, json, os, re, sys, time, requests
+import argparse, json, os, re, sys, threading, time, requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 # ── Config ──────────────────────────────────────────────────────────────────
@@ -180,7 +181,7 @@ def extract_requirement(name, node, body, dry_run=False) -> str:
                 "max_tokens": 1500,
                 "temperature": 0,
             },
-            timeout=15
+            timeout=90
         )
         r.raise_for_status()
         raw = r.json()["choices"][0]["message"]["content"].strip()
@@ -235,6 +236,8 @@ def main():
                         help="Only process first N modules (for testing)")
     parser.add_argument("--embed", action="store_true",
                         help="Also generate embeddings (requires embed server)")
+    parser.add_argument("--workers", type=int, default=5,
+                        help="Concurrent LLM extraction workers (default 5)")
     args = parser.parse_args()
 
     nodes, body_store, activity_index = load_artifacts()
@@ -254,17 +257,32 @@ def main():
     if args.dry_run:
         print("  DRY RUN — no LLM calls", flush=True)
 
-    for i, (name, artifacts_text, act) in enumerate(todo):
-        # Build a minimal node proxy for extract_requirement
+    _lock = threading.Lock()
+    _done = [0]
+
+    def _process(item):
+        name, artifacts_text, act = item
         node_proxy = {"embed_text": artifacts_text}
         req = extract_requirement(name, node_proxy, "", dry_run=args.dry_run)
-        if req:
-            results[name] = {"requirement": req, "activity_score": act}
+        return name, req, act
 
-        if (i + 1) % BATCH_SIZE == 0:
-            # Save progress checkpoint
+    def _checkpoint():
+        with _lock:
             open(out_json, "w").write(json.dumps(results, indent=2))
-            print(f"  [{i+1}/{len(todo)}] saved checkpoint", flush=True)
+
+    n_workers = 1 if args.dry_run else args.workers
+    with ThreadPoolExecutor(max_workers=n_workers) as pool:
+        futures = {pool.submit(_process, item): item for item in todo}
+        for fut in as_completed(futures):
+            name, req, act = fut.result()
+            with _lock:
+                if req:
+                    results[name] = {"requirement": req, "activity_score": act}
+                _done[0] += 1
+                if _done[0] % BATCH_SIZE == 0:
+                    open(out_json, "w").write(json.dumps(results, indent=2))
+                    print(f"  [{_done[0]}/{len(todo)}] checkpoint — {len(results)} extracted",
+                          flush=True)
 
     # Final save
     open(out_json, "w").write(json.dumps(results, indent=2))
