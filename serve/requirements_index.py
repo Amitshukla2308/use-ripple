@@ -58,8 +58,9 @@ _loaded = False
 
 def _load_lance():
     try:
-        import lance
-        return lance.dataset(str(REQUIREMENTS_LANCE))
+        import lancedb
+        db = lancedb.connect(str(REQUIREMENTS_LANCE.parent))
+        return db.open_table(REQUIREMENTS_LANCE.stem)  # "requirements"
     except Exception as e:
         return None
 
@@ -168,32 +169,25 @@ def search_requirements(query: str, k: int = 5) -> list[RequirementCluster]:
 
 
 def _vector_search(query: str, k: int) -> list[RequirementCluster]:
-    """Full vector search via requirements.lance."""
+    """Full vector search via requirements.lance using lancedb ANN."""
     qvec = _embed_query(query)
     if qvec is None:
         return _keyword_search(query, k)
 
-    import pyarrow as pa
     try:
-        raw = (
-            _lance_tbl
-            .to_table(columns=["name", "requirement", "vector"])
-            .to_pydict()
-        )
-        names = raw["name"]
-        reqs = raw["requirement"]
-        vecs = raw["vector"]
-
-        # Score all
-        qv = np.array(qvec, dtype=np.float32)
+        hits = _lance_tbl.search(qvec).limit(k * 3).to_list()
+        # lancedb returns dicts with _distance; convert to scored hits
         scored = []
-        for name, req, vec_list in zip(names, reqs, vecs):
-            v = np.array(vec_list, dtype=np.float32)
-            denom = np.linalg.norm(qv) * np.linalg.norm(v)
-            sim = float(np.dot(qv, v) / denom) if denom > 0 else 0.0
-            scored.append({"name": name, "requirement": req, "vector": list(vec_list), "score": sim})
-
-        scored.sort(key=lambda x: -x["score"])
+        for h in hits:
+            # _distance is L2 — convert to cosine-like score (lower = better → invert)
+            dist = h.get("_distance", 1.0)
+            score = max(0.0, 1.0 - dist / 2.0)
+            scored.append({
+                "name": h["name"],
+                "requirement": h["requirement"],
+                "vector": h.get("vector", []),
+                "score": score,
+            })
         top = scored[:k * 3]
     except Exception:
         return _keyword_search(query, k)

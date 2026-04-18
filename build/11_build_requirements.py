@@ -206,24 +206,23 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 def save_to_lance(records: list[dict], output_path: Path):
     """Save requirement vectors to a LanceDB table."""
     try:
-        import lance
+        import lancedb
         import numpy as np
-        import pyarrow as pa
     except ImportError:
-        print("  lance/pyarrow not available — skipping vector storage", flush=True)
+        print("  lancedb not available — skipping vector storage", flush=True)
         return
 
-    vecs = np.array([r["vector"] for r in records], dtype=np.float32)
-    names = [r["name"] for r in records]
-    reqs = [r["requirement"] for r in records]
-
-    tbl = pa.table({
-        "vector": pa.FixedSizeListArray.from_arrays(
-            pa.array(vecs.flatten(), type=pa.float32()), 4096),
-        "name": pa.array(names, type=pa.string()),
-        "requirement": pa.array(reqs, type=pa.string()),
-    })
-    lance.write_dataset(tbl, str(output_path), mode="overwrite")
+    data = [
+        {
+            "vector": r["vector"],
+            "name": r["name"],
+            "requirement": r["requirement"],
+        }
+        for r in records
+    ]
+    db = lancedb.connect(str(output_path.parent))
+    tbl_name = output_path.stem  # "requirements"
+    db.create_table(tbl_name, data=data, mode="overwrite")
     print(f"  Saved {len(records)} vectors to {output_path}", flush=True)
 
 
