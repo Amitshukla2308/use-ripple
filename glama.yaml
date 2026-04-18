@@ -1,0 +1,64 @@
+---
+name: ripple-mcp
+displayName: "Ripple MCP — Codebase Intelligence"
+description: >
+  Self-hosted MCP server for codebase intelligence. Semantic symbol search,
+  blast-radius analysis, change-prediction, AI code guardrails, and reviewer
+  suggestions — all backed by a graph+vector index of your own code. Works
+  with Cursor, Claude Code, VS Code Copilot, and any MCP-compatible IDE.
+license: Apache-2.0
+homepage: https://github.com/Amitshukla2308/use-ripple
+repository: https://github.com/Amitshukla2308/use-ripple
+categories:
+  - code-intelligence
+  - developer-tools
+  - code-search
+  - code-review
+keywords:
+  - codebase-intelligence
+  - semantic-search
+  - blast-radius
+  - change-prediction
+  - ai-guardrails
+  - mcp
+  - code-graph
+install:
+  pip: ripple-mcp
+  command: python -m ripple.mcp_server
+tools:
+  - name: search_symbols
+    description: Semantic search for functions, classes, and variables by meaning
+  - name: search_modules
+    description: Find modules and files by description or purpose
+  - name: get_module
+    description: Get all symbols in a module with summaries
+  - name: get_function_body
+    description: Retrieve the full implementation of a function
+  - name: trace_callers
+    description: Find all code paths that call a given function
+  - name: trace_callees
+    description: Find all functions called by a given function
+  - name: get_blast_radius
+    description: Predict which files/modules are impacted by a set of changes
+  - name: predict_missing_changes
+    description: Suggest files likely missing from a change set using co-change history
+  - name: check_my_changes
+    description: Review your staged changes for completeness and risk
+  - name: suggest_reviewers
+    description: Recommend best reviewers based on commit history
+  - name: score_change_risk
+    description: Score the risk of a change set across criticality dimensions
+  - name: check_criticality
+    description: Determine if a module is critical (payment flows, auth, etc.)
+  - name: get_guardrails
+    description: Get AI-generated guardrail rules for critical modules
+  - name: list_critical_modules
+    description: List all critical modules in the codebase
+  - name: fast_search
+    description: BM25 keyword search for fast, exact-match symbol lookup
+  - name: fast_search_reranked
+    description: BM25 + semantic reranking for precision symbol search
+  - name: get_why_context
+    description: Get the historical rationale and decisions behind a symbol
+  - name: get_context
+    description: Get full surrounding context (callers, callees, co-changed files)
