@@ -1245,15 +1245,51 @@ def predict_missing_changes(changed_modules: list, min_weight: int = 5,
     predictions.sort(key=lambda x: (-x["confidence"], -x["weight"]))
     predictions = predictions[:top_k]
 
+    # Granger-exclusive predictions: causal candidates not surfaced by co-change
+    granger_exclusive: list = []
+    if granger_index or granger_cross_index:
+        changed_cc = {_resolve_cc(m) for m in changed_set}
+        predicted_set = {p["module"] for p in predictions}
+        seen_ge: dict = {}
+        for gi in (granger_index, granger_cross_index):
+            for g in gi.values():
+                src = g.get("source", "")
+                if src not in changed_cc:
+                    continue
+                tgt_cc = g.get("target", "")
+                tgt_mg = _resolve_mg(tgt_cc)
+                if tgt_mg in changed_set or tgt_mg in predicted_set:
+                    continue
+                pv = g.get("p_value", 1.0)
+                if m := seen_ge.get(tgt_mg):
+                    if pv >= m["p_value"]:
+                        continue
+                svc = ""
+                if MG is not None and tgt_mg in MG.nodes:
+                    svc = MG.nodes[tgt_mg].get("service", "")
+                seen_ge[tgt_mg] = {
+                    "module": tgt_mg,
+                    "source": _resolve_mg(src),
+                    "p_value": pv,
+                    "f_statistic": g.get("f_statistic", 0.0),
+                    "lag": g.get("best_lag", 1),
+                    "strength": "strong" if pv < 0.01 else "moderate",
+                    "service": svc,
+                }
+        granger_exclusive = sorted(seen_ge.values(), key=lambda x: -x["f_statistic"])[:3]
+
     # Coverage score: what fraction of expected changes are actually in the changeset
     total_expected = len(changed_set) + len([p for p in predictions if p["confidence"] > 0.3])
     coverage = len(changed_set) / total_expected if total_expected > 0 else 1.0
 
-    return {
+    result = {
         "changed": sorted(changed_set),
         "predictions": predictions,
         "coverage_score": round(coverage, 3),
     }
+    if granger_exclusive:
+        result["granger_exclusive_predictions"] = granger_exclusive
+    return result
 
 
 def suggest_reviewers(changed_modules: list, top_k: int = 5) -> dict:
