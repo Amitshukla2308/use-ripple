@@ -68,7 +68,7 @@ One config block gives your entire team's AI assistants access to your codebase'
 }
 ```
 
-**Setup guides:** [Cursor](docs/cursor.md) · [GitHub Copilot](docs/copilot.md) · [OpenHands](docs/openhands.md)
+**Setup guides:** [Cursor](docs/cursor.md) · [GitHub Copilot](docs/copilot.md) · [OpenHands](docs/openhands.md) · [Cursor Bugbot](docs/cursor-bugbot.md)
 
 | Tool | What it answers |
 |------|----------------|
