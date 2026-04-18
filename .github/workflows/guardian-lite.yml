@@ -91,7 +91,7 @@ jobs:
 
       - name: Install build dependencies
         if: steps.cache-indexes.outputs.cache-hit != 'true' || github.event.inputs.force_rebuild == 'true' || github.event_name == 'schedule'
-        run: pip install networkx pyyaml
+        run: pip install networkx pyyaml openai
 
       - name: Checkout Ripple
         if: steps.cache-indexes.outputs.cache-hit != 'true' || github.event.inputs.force_rebuild == 'true' || github.event_name == 'schedule'
@@ -157,7 +157,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install analysis dependencies
-        run: pip install networkx pyyaml lancedb pyarrow rank-bm25 ijson
+        run: pip install networkx pyyaml lancedb pyarrow rank-bm25 ijson openai
 
       - name: Get changed files
         id: changed
