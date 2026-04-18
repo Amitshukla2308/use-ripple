@@ -36,7 +36,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
 
       - name: Install dependencies
         run: pip install networkx lancedb pyyaml pyarrow
@@ -71,10 +70,14 @@ jobs:
             --artifact-dir "${{ env.ARTIFACT_DIR }}" \
             $RULES_ARG \
             --files ${{ steps.changed.outputs.files }} \
-            2>/dev/null)
+            2>/dev/null) || true
 
           # Save report for comment step
-          echo "$REPORT" > /tmp/guardian_report.md
+          if [ -n "$REPORT" ]; then
+            echo "$REPORT" > /tmp/guardian_report.md
+          else
+            echo "No Guardian report generated (no modules resolved)" > /tmp/guardian_report.md
+          fi
 
           # Also generate JSON for machine parsing
           python3 .ripple/apps/cli/pr_analyzer.py \
