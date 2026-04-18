@@ -7,7 +7,7 @@
 
 **Code intelligence from git history — not static analysis.**
 
-Works inside **Claude Code · Cursor · GitHub Copilot Agent · OpenHands · Windsurf**
+Works inside **Claude Code · Cursor · GitHub Copilot Agent · OpenHands · Windsurf · JetBrains AI Assistant**
 
 > Looking for a GitNexus alternative? Ripple adds what GitNexus can't: co-change history, Granger causal direction, and blast radius from 100K+ real commits — not just the AST.
 
@@ -68,7 +68,7 @@ One config block gives your entire team's AI assistants access to your codebase'
 }
 ```
 
-**Setup guides:** [Cursor](docs/cursor.md) · [GitHub Copilot](docs/copilot.md) · [OpenHands](docs/openhands.md) · [Cursor Bugbot](docs/cursor-bugbot.md)
+**Setup guides:** [Cursor](docs/cursor.md) · [GitHub Copilot](docs/copilot.md) · [OpenHands](docs/openhands.md) · [Cursor Bugbot](docs/cursor-bugbot.md) · [JetBrains](docs/jetbrains.md)
 
 | Tool | What it answers |
 |------|----------------|
