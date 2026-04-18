@@ -768,6 +768,35 @@ def list_critical_modules(
 
 
 @mcp.tool()
+def find_dead_code(threshold_days: int = 180, service: str = None, top_k: int = 50) -> str:
+    """Find modules not touched in threshold_days days — dead code candidates.
+
+    Stalest-first. service= scopes to one microservice (e.g. "euler-db").
+    High total_commits + long stale = probably stable library code.
+    Zero total_commits + long stale = strong dead code signal.
+
+    Args:
+        threshold_days: days since last commit (default 180 = 6 months)
+        service:        optional microservice filter
+        top_k:          max results (default 50)
+    """
+    result = RE.find_dead_code(threshold_days=threshold_days, service=service, top_k=top_k)
+    lines = [f"## Dead Code Candidates — stale {threshold_days}+ days\n"]
+    lines.append(result.get("note", ""))
+    lines.append("")
+    if not result.get("modules"):
+        lines.append("No stale modules found.")
+        return "\n".join(lines)
+    lines.append("| Module | Service | Last Touched | Days Stale | Commits |")
+    lines.append("|--------|---------|--------------|------------|---------|")
+    for m in result.get("modules", []):
+        mod_short = m["module"].split(".")[-1][:45]
+        svc = m["service"][:25]
+        lines.append(f"| {mod_short} | {svc} | {m['last_touched']} | {m['days_stale']} | {m['total_commits']} |")
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def fast_search(query: str, top_k: int = 10) -> str:
     """
     Zero-GPU keyword search: BM25 + IDF graph index, no embed server required.

@@ -1667,6 +1667,54 @@ def list_critical_modules(service: str = None, threshold: float = 0.5, top_k: in
     }
 
 
+def find_dead_code(threshold_days: int = 180, service: str = None,
+                   top_k: int = 50) -> dict:
+    """Find modules not touched in `threshold_days` days — dead code candidates.
+
+    Returns modules sorted by days-since-last-touch (stalest first).
+    service= filters to one microservice. threshold_days default 180.
+    """
+    from datetime import date as _date
+    if not activity_index:
+        return {"modules": [], "total": 0, "source": "unavailable",
+                "note": "activity_index not loaded — run build/10_build_activity.py first"}
+
+    today = _date.today()
+    candidates = []
+    for mod, info in activity_index.items():
+        last_str = info.get("last_touched_date", "")
+        if not last_str:
+            continue
+        repo = info.get("repo", "")
+        if service and service.lower() not in repo.lower():
+            continue
+        try:
+            age_days = (today - _date.fromisoformat(last_str)).days
+        except ValueError:
+            continue
+        if age_days >= threshold_days:
+            candidates.append({
+                "module": mod,
+                "service": repo,
+                "last_touched": last_str,
+                "days_stale": age_days,
+                "total_commits": info.get("total_commits", 0),
+            })
+
+    candidates.sort(key=lambda x: -x["days_stale"])
+    return {
+        "total": len(candidates),
+        "showing": min(top_k, len(candidates)),
+        "threshold_days": threshold_days,
+        "service_filter": service,
+        "note": (f"{len(candidates)} modules not touched in {threshold_days}+ days "
+                 f"({len(candidates)/max(len(activity_index),1)*100:.1f}% of indexed modules). "
+                 "High total_commits + long stale = likely stable; "
+                 "zero total_commits + long stale = likely dead."),
+        "modules": candidates[:top_k],
+    }
+
+
 def get_why_context(symbol_name: str) -> dict:
     """Return 'why' context for a module: ownership, activity trend, Granger causal
     relationships, criticality reasons, and anti-pattern flags.

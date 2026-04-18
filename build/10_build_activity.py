@@ -47,7 +47,7 @@ def build_activity_index(git_history_path: str, artifact_dir: str):
     # Per-module activity counters
     module_activity = defaultdict(lambda: {
         "activity_50": 0, "activity_200": 0, "last_commit_idx": -1,
-        "total_commits": 0, "repo": "",
+        "total_commits": 0, "repo": "", "last_touched_date": "",
     })
 
     total_commits = 0
@@ -65,11 +65,14 @@ def build_activity_index(git_history_path: str, artifact_dir: str):
                 if mod:
                     modules_in_commit.add(mod)
 
+            commit_date = commit.get("date", "")[:10]  # YYYY-MM-DD
             for mod in modules_in_commit:
                 entry = module_activity[mod]
                 entry["repo"] = rname
                 entry["total_commits"] += 1
                 entry["last_commit_idx"] = local_idx
+                if commit_date > entry["last_touched_date"]:
+                    entry["last_touched_date"] = commit_date
                 if local_idx >= n - 50:
                     entry["activity_50"] += 1
                 if local_idx >= n - 200:
@@ -91,6 +94,7 @@ def build_activity_index(git_history_path: str, artifact_dir: str):
             ),
             "total_commits": entry["total_commits"],
             "repo": entry["repo"],
+            "last_touched_date": entry["last_touched_date"],
         }
 
     out_path = os.path.join(artifact_dir, "activity_index.json")
