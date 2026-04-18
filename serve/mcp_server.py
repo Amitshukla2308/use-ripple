@@ -504,6 +504,14 @@ def check_my_changes(changed_files: list[str]) -> str:
         for p in predictions[:5]:
             lines.append(f"  - **{p['module']}** ({p['confidence']:.0%}) -- {p['reason']}")
 
+    granger_excl = missing.get("granger_exclusive_predictions", [])
+    if granger_excl:
+        lines.append("\n### Causal Predictions (Granger-only — no co-change history)")
+        for g in granger_excl:
+            strength = g.get("strength", "moderate")
+            svc = f" [{g['service']}]" if g.get("service") else ""
+            lines.append(f"  - **{g['module']}**{svc} ← {g.get('source', '?')} (lag={g.get('lag',1)}, {strength})")
+
     if sec_flagged[:5]:
         lines.append("\n### Security Review Needed")
         for m in sec_flagged[:5]:
