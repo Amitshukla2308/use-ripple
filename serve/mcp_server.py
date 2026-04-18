@@ -608,20 +608,14 @@ def score_change_risk(changed_files: list[str], weights: dict | None = None) -> 
     """
     Compute a composite risk score (0-100) for a set of changed files/modules.
 
-    Combines four signals into one actionable number:
-    - Blast radius (how many services affected)
-    - Coverage gap (how many co-changes are missing)
-    - Reviewer risk (bus factor / ownership concentration)
-    - Service spread (how many services the changes span)
+    NOTE: check_my_changes already includes this score in its output. Call
+    score_change_risk directly only when you need the score WITHOUT the full
+    blast-radius and PR-completeness analysis.
 
-    Use this to gate PRs in CI/CD or prioritize review effort.
-
-    Returns: risk score, risk level (LOW/MEDIUM/HIGH/CRITICAL),
-    per-component breakdown, and recommendation.
+    Combines four signals: blast radius, coverage gap, reviewer risk, service spread.
 
     Examples:
       score_change_risk(["PaymentFlows", "TransactionHelper"])
-      score_change_risk(["api-gateway/src/routes.py"])
     """
     # Resolve files to modules
     resolved = RE.resolve_files_to_modules(changed_files)
@@ -768,43 +762,36 @@ def list_critical_modules(
 
 
 @mcp.tool()
-def fast_search(query: str, top_k: int = 10) -> str:
+def fast_search(query: str, top_k: int = 10, rerank: bool | None = None) -> str:
     """
     Zero-GPU keyword search: BM25 + IDF graph index, no embed server required.
 
     Use this when:
-    - The embed server is not running (keyword-only or offline deployments)
     - You have an exact function/class/module name to look up
     - You need a sub-50ms result without semantic search overhead
+    - The embed server is not running (keyword-only deployments)
 
-    For natural-language or conceptual queries, use search_symbols instead —
-    it adds vector search and co-change expansion for higher recall.
+    For natural-language or conceptual queries, use search_symbols instead.
 
     Args:
-        query:  Symbol name, module keyword, or exact identifier
-        top_k:  Max results per service (default 10)
+        query:   Symbol name, module keyword, or exact identifier
+        top_k:   Max results per service (default 10)
+        rerank:  True = cross-encoder rerank (requires HR_RERANKER=1 startup);
+                 False = plain BM25; None (default) = auto (rerank if available)
     """
+    use_rerank = rerank if rerank is not None else bool(getattr(RE, "reranker", None))
+    if use_rerank:
+        return T.tool_fast_search_reranked(query, top_k)
     return T.tool_fast_search(query, top_k)
 
 
 @mcp.tool()
 def fast_search_reranked(query: str, top_k: int = 10) -> str:
     """
-    BM25 search with cross-encoder reranking. Requires HR_RERANKER=1 at startup.
-    Falls back to fast_search if the reranker is not loaded.
+    Deprecated alias for fast_search(rerank=True). Use fast_search instead.
 
-    Fetches BM25 top-30, scores each with ms-marco-MiniLM-L-6-v2 (CPU, ~20ms),
-    and returns the reranked top-k. Significantly better than fast_search when
-    the correct symbol is in the BM25 window but buried below irrelevant matches.
-
-    Use this when:
-    - fast_search returns results but top-3 feel wrong
-    - Your query is conceptual ('webhook notification handler') not a bare identifier
-    - You want best keyword-mode precision without GPU/embed server
-
-    Args:
-        query:  Natural-language or identifier query
-        top_k:  Max total results (default 10)
+    BM25 top-30 → cross-encoder rerank. Requires HR_RERANKER=1 at startup.
+    Falls back to plain BM25 if reranker not loaded.
     """
     return T.tool_fast_search_reranked(query, top_k)
 
