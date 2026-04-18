@@ -506,11 +506,43 @@ def check_my_changes(changed_files: list[str]) -> str:
 
     granger_excl = missing.get("granger_exclusive_predictions", [])
     if granger_excl:
-        lines.append("\n### Causal Predictions (Granger-only — no co-change history)")
+        # T-043: split cross-service (coordinate with team) vs same-service (follow-up yourself)
+        def _svc_of(mod: str) -> str:
+            import retrieval_engine as _RE
+            if _RE.MG is not None and mod in _RE.MG.nodes:
+                return _RE.MG.nodes[mod].get("service", "")
+            return ""
+
+        cross_tier, same_tier = [], []
         for g in granger_excl:
-            strength = g.get("strength", "moderate")
-            svc = f" [{g['service']}]" if g.get("service") else ""
-            lines.append(f"  - **{g['module']}**{svc} ← {g.get('source', '?')} (lag={g.get('lag',1)}, {strength})")
+            tgt_svc = g.get("service") or _svc_of(g.get("module", ""))
+            src_svc = _svc_of(g.get("source", ""))
+            if tgt_svc and src_svc and tgt_svc != src_svc:
+                cross_tier.append((g, tgt_svc))
+            else:
+                same_tier.append(g)
+
+        if cross_tier:
+            lines.append("\n### Coordinate With Another Team (Granger — cross-service)")
+            for g, tgt_svc in cross_tier:
+                strength = g.get("strength", "moderate")
+                owners = RE.ownership_index.get(g["module"]) or []
+                owner_str = ""
+                if owners:
+                    top = owners[0]
+                    owner_str = f" — owner: {top.get('name') or top.get('email', '?')}"
+                lines.append(
+                    f"  - **{g['module']}** [{tgt_svc}]{owner_str}"
+                    f" ← {g.get('source', '?')} (lag={g.get('lag',1)}, {strength})"
+                )
+
+        if same_tier:
+            lines.append("\n### Your Follow-up Queue (Granger — same service, likely generated)")
+            for g in same_tier:
+                strength = g.get("strength", "moderate")
+                lines.append(
+                    f"  - **{g['module']}** ← {g.get('source', '?')} (lag={g.get('lag',1)}, {strength})"
+                )
 
     if sec_flagged[:5]:
         lines.append("\n### Security Review Needed")
