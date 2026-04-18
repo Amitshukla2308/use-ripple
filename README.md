@@ -215,19 +215,21 @@ Full artifacts: `~/lab/experiments/` · Active threads: `~/lab/OPEN_QUESTIONS.md
 
 ## How it compares
 
-| | ripple-mcp | GitNexus | Sourcegraph Cody | GitHub Copilot |
-|--|--|--|--|--|
-| **Co-change index** (which files change together) | ✅ | ❌ | ❌ | ❌ |
-| **Granger causality** (causal direction between modules) | ✅ | ❌ | ❌ | ❌ |
-| **Blast radius prediction** | ✅ | ❌ | ❌ | partial |
-| **Ownership + reviewer suggestions** | ✅ | ❌ | partial | partial |
-| **AI code guardrails** (semantic safety checks) | ✅ | ❌ | ❌ | ❌ |
-| **Static call graph / AST** | ✅ | ✅ | ✅ | ✅ |
-| **Semantic search** | ✅ | ✅ | ✅ | ✅ |
-| **Self-hosted / air-gapped** | ✅ | ✅ | ❌ | ❌ |
-| **Requires GPU** | optional | ❌ | ❌ | ❌ |
+| | ripple-mcp | Codebase Memory MCP | GitNexus | Sourcegraph Cody | GitHub Copilot |
+|--|--|--|--|--|--|
+| **Co-change index** (which files change together) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Granger causality** (causal direction between modules) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Blast radius prediction** | ✅ | ❌ | ❌ | ❌ | partial |
+| **Ownership + reviewer suggestions** | ✅ | ❌ | ❌ | partial | partial |
+| **Bus factor risk** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Cross-repo temporal coupling** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **AI code guardrails** (semantic safety checks) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Static call graph / AST** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Semantic search** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Self-hosted / air-gapped** | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **Requires GPU** | optional | ❌ | ❌ | ❌ | ❌ |
 
-**The core difference:** GitNexus and static tools tell you *what your code is*. ripple-mcp tells you *how your code changes* — which modules co-change historically, which changes causally drive others, and who owns what. Git history is the signal that static analysis cannot replicate.
+**The core difference:** Codebase Memory MCP, GitNexus, and static tools tell you *what your code is*. ripple-mcp tells you *how your code changes* — which modules co-change historically, which changes causally drive others, and who owns what. [Benchmarked 2026-04-18: Ripple 80% vs Codebase Memory 33% across 15 capability queries.](lab/experiments/t047_codebase_memory_benchmark/findings.md) Git history is the signal that static analysis cannot replicate.
 
 ## Self-hosted. Your code never leaves your machines.
 
