@@ -827,10 +827,8 @@ def cochange_path_traverse(seed_modules: list, max_hops: int = 4,
         total_modules = len(cochange_index)
         if total_modules < 50:
             min_weight = 2
-        elif total_modules < 500:
-            min_weight = 3
         else:
-            min_weight = 5
+            min_weight = 3
     visited = {}
     for m in seed_modules:
         cc_key = _resolve_cc(m)
@@ -1139,7 +1137,7 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
     return result
 
 
-def predict_missing_changes(changed_modules: list, min_weight: int = 5,
+def predict_missing_changes(changed_modules: list, min_weight: int = 3,
                              top_k: int = 20) -> dict:
     """Predict modules likely missing from a changeset based on co-change history.
 
