@@ -1870,18 +1870,29 @@ def fast_search_reranked(query: str, top_k: int = 10) -> dict:
     # → reranker risks demoting exact-name matches in favour of body-matched results.
     # Threshold 0.30 derived from empirical calibration on 7-query benchmark (2026-04-17):
     # spread < 0.30 correlated with neutral/harmful reranking; ≥ 0.30 with genuine gains.
+    #
+    # T-014b dual gate (2026-04-18): spread alone is not sufficient for high-frequency domain
+    # terms (e.g. "refund", "mandate"). These have n_positive > 500 because every doc that
+    # mentions the word gets a score — score compression from document frequency makes spread
+    # artificially low (0.269), not because BM25 is confident but because all scores cluster.
+    # Fix: only skip reranking when spread is low AND n_positive is small. High n_positive =
+    # high-frequency term = spread compression artifact → send to reranker anyway.
     _bm25_scores = sorted([n.get("_bm25_score", 0) for n in flat], reverse=True)
     _max_s = _bm25_scores[0] if _bm25_scores else 0
     _med_s = _bm25_scores[len(_bm25_scores) // 2] if _bm25_scores else 0
     _spread = (_max_s - _med_s) / _max_s if _max_s > 0 else 0
+    _n_positive = sum(1 for s in _bm25_scores if s > 0)
     _RERANK_THRESHOLD = 0.30
-    if _spread < _RERANK_THRESHOLD:
+    _HIGH_FREQ_OVERRIDE = 500
+    if _spread < _RERANK_THRESHOLD and _n_positive <= _HIGH_FREQ_OVERRIDE:
         # BM25 is confident — reranking adds risk without reward; return top-k by BM25 score
         flat_sorted = sorted(flat, key=lambda x: -x.get("_bm25_score", 0))[:top_k]
         result: dict = defaultdict(list)
         for node in flat_sorted:
             result[node.get("service", "unknown")].append(node)
         return dict(result)
+    # n_positive > _HIGH_FREQ_OVERRIDE: spread compressed by doc frequency, not true confidence.
+    # Fall through to cross-encoder reranker even with low spread.
 
     # Build (query, context) pairs — strip dots so tokenizer sees words, not hierarchy
     pairs = []
