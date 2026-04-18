@@ -62,6 +62,7 @@ activity_index:      dict  = {}   # module_name → {"activity_score", "activity
 criticality_index:   dict  = {}   # module_name → {"score", "rank", "signals", "reasons"}
 guardrails_index:    dict  = {}   # module_name → {"file", "score", ...}
 guardrails_content:  dict  = {}   # module_name → guardrail markdown text
+commit_rationale_index: dict = {}  # repo::path → [{"msg","date","hash"}]
 file_to_nodes:       dict  = {}   # module_name → [node_id, ...]
 filepath_to_module:  dict  = {}   # relative_file_path → module_name
 _cochange_loaded_at: float = 0.0
@@ -237,6 +238,7 @@ def initialize(
     global embedder, _llm_client, G, MG, lance_tbl, cluster_summaries
     global body_store, call_graph, log_patterns, doc_chunks, doc_by_id, gw_integrity
     global doc_lance_tbl, _cochange_loaded_at, _idf
+    global commit_rationale_index
 
     if config_path:
         load_config(config_path)
@@ -532,6 +534,15 @@ def initialize(
                 content = gf.read_text()
                 guardrails_content[gf.stem] = content
             print(f"  {len(guardrails_content)} guardrail documents loaded")
+
+        # Load commit rationale index (from 11_build_commit_rationale.py)
+        _cr_path = artifact_dir / "commit_rationale_index.json"
+        if _cr_path.exists():
+            print("Loading commit rationale index...")
+            with open(str(_cr_path)) as _f:
+                commit_rationale_index.update(json.load(_f))
+            _n_cr = sum(len(v) for v in commit_rationale_index.values())
+            print(f"  {len(commit_rationale_index)} paths, {_n_cr} commit subjects")
 
         # Inject synthetic co-change edges from call_graph (cold-start fix)
         if call_graph and cochange_index is not None:
@@ -1743,6 +1754,7 @@ def get_why_context(symbol_name: str) -> dict:
         "causal_outputs": [],
         "causal_inputs": [],
         "anti_patterns": [],
+        "commit_rationale": [],
     }
 
     cc_key = _resolve_cc(symbol_name)
@@ -1842,6 +1854,16 @@ def get_why_context(symbol_name: str) -> dict:
             "this code is reactive. Consider stabilising its interface."
         )
     result["anti_patterns"] = anti
+
+    # Commit rationale — informative commit subjects (>100 chars, non-boilerplate) for this module
+    if commit_rationale_index:
+        _cr = (commit_rationale_index.get(cc_key)
+               or commit_rationale_index.get(symbol_name)
+               or commit_rationale_index.get(mg_key)
+               or [])
+        if _cr:
+            result["found"] = True
+            result["commit_rationale"] = _cr[:5]
 
     return result
 

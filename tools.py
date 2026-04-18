@@ -965,6 +965,11 @@ def tool_get_why_context(symbol_name: str) -> str:
         for ap in data["anti_patterns"]:
             lines.append(f"  ⚠  {ap}")
 
+    if data.get("commit_rationale"):
+        lines.append("\nRecent commit context (informative subjects):")
+        for cr in data["commit_rationale"]:
+            lines.append(f"  [{cr.get('date','')}] {cr.get('msg','')[:160]}")
+
     return "\n".join(lines)
 
 
