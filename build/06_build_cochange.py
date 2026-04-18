@@ -4,14 +4,36 @@ Stage 6 — Build evolutionary coupling graph from git history.
 Streams one commit at a time (O(1) memory).
 Handles truncated/incomplete JSON files gracefully — writes partial results.
 """
-import argparse, json, pathlib, sys
+import argparse, json, math, pathlib, sys, time
 from collections import defaultdict
+from datetime import datetime, timezone
 from itertools import combinations
 
 try:
     import ijson
 except ImportError:
     raise SystemExit("pip install ijson")
+
+DECAY_LAMBDA = math.log(2) / 180.0  # half-life 180 days
+BUILD_TIME = time.time()
+
+
+def parse_ts(value) -> float | None:
+    try:
+        if isinstance(value, (int, float)):
+            return float(value)
+        ts = str(value).strip()
+        for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S %z", "%Y-%m-%d"):
+            try:
+                dt = datetime.strptime(ts[:len(fmt) + 5], fmt)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.timestamp()
+            except ValueError:
+                continue
+    except Exception:
+        pass
+    return None
 
 parser = argparse.ArgumentParser(description="Build co-change index from git history")
 parser.add_argument("--git-history", type=pathlib.Path,
@@ -52,18 +74,21 @@ def to_module(repo: str, fpath: str) -> str:
 
 
 def build():
-    cochange = defaultdict(lambda: defaultdict(int))
-    total_commits = 0
-    skipped       = 0
-    current_repo  = None
-    truncated     = False
+    cochange       = defaultdict(lambda: defaultdict(int))
+    cochange_decay = defaultdict(lambda: defaultdict(float))  # T-040: accumulated per-occurrence decay
+    total_commits  = 0
+    skipped        = 0
+    current_repo   = None
+    truncated      = False
+    n_with_ts      = 0
 
     print(f"Streaming {GIT_HISTORY}...", flush=True)
 
     with open(GIT_HISTORY, "rb") as f:
         parser = ijson.parse(f, use_float=True)
-        in_commit    = False
-        commit_files = []
+        in_commit        = False
+        commit_files     = []
+        commit_timestamp = None
 
         try:
             for prefix, event, value in parser:
@@ -75,8 +100,16 @@ def build():
 
                 # Detect commit start
                 if prefix == "repositories.item.commits.item" and event == "start_map":
-                    in_commit    = True
-                    commit_files = []
+                    in_commit        = True
+                    commit_files     = []
+                    commit_timestamp = None
+                    continue
+
+                # Capture timestamp (T-040: needed for decay weight)
+                if in_commit and event in ("string", "number") and \
+                        prefix.endswith((".timestamp", ".date", ".authored_date")):
+                    if commit_timestamp is None:
+                        commit_timestamp = value
                     continue
 
                 # Collect only files_changed paths (ignore diff/body/other fields)
@@ -92,9 +125,18 @@ def build():
 
                     if 2 <= len(commit_files) <= MAX_FILES and current_repo:
                         mods = [to_module(current_repo, fp) for fp in commit_files]
+                        ts = parse_ts(commit_timestamp) if commit_timestamp else None
+                        if ts is not None:
+                            n_with_ts += 1
+                            days_ago = max(0.0, (BUILD_TIME - ts) / 86400.0)
+                            dw = math.exp(-DECAY_LAMBDA * days_ago)
+                        else:
+                            dw = 0.0  # no timestamp → contributes 0 to decay weight
                         for a, b in combinations(mods, 2):
                             cochange[a][b] += 1
                             cochange[b][a] += 1
+                            cochange_decay[a][b] += dw
+                            cochange_decay[b][a] += dw
                     elif len(commit_files) > MAX_FILES:
                         skipped += 1
 
@@ -107,6 +149,9 @@ def build():
             truncated = True
             print(f"\nWARNING: JSON parsing stopped at {total_commits:,} commits: {exc}", flush=True)
             print("Writing partial results...", flush=True)
+
+    print(f"  Timestamp coverage: {n_with_ts:,}/{total_commits:,} commits "
+          f"({n_with_ts/max(total_commits,1)*100:.1f}%)", flush=True)
 
     status = "PARTIAL (file truncated)" if truncated else "COMPLETE"
     print(f"\n{status}: {total_commits:,} commits processed  {skipped} mega-commits skipped",
@@ -124,11 +169,13 @@ def build():
         MIN_WEIGHT = 3
 
     # Filter: keep only pairs with weight >= MIN_WEIGHT, cap at TOP_K per module
+    # T-040: include decay_weight field; min_weight gate stays on flat count (no coverage loss)
     edges, total_pairs = {}, 0
     for mod, partners in cochange.items():
         filtered = sorted(
-            [{"module": m, "weight": w} for m, w in partners.items() if w >= MIN_WEIGHT],
-            key=lambda x: -x["weight"]
+            [{"module": m, "weight": w, "decay_weight": round(cochange_decay[mod].get(m, 0.0), 4)}
+             for m, w in partners.items() if w >= MIN_WEIGHT],
+            key=lambda x: -x["decay_weight"]  # sort by decay signal; flat weight used only for gating
         )[:TOP_K]
         if filtered:
             edges[mod] = filtered
