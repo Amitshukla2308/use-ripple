@@ -44,6 +44,20 @@ Every other tool counts import edges. Ripple counts how often files *actually ch
 | recall@10 | 0.11 | **0.47** | **+322%** |
 | MRR | 0.08 | **0.36** | +359% |
 
+### Granger Causality Index — directional coupling, not just correlation
+
+Co-change tools tell you files A and B change together. The Granger causality index tells you *which direction*: does changing A *predict* that B will change, or is it B → A?
+
+Ripple builds a directed causality graph from your git history using Granger's statistical test (lag-5 commits, p<0.05). The result:
+
+- **19,981 intra-service directional pairs** across services
+- **48,947 cross-service pairs** — A in service X predicts B in service Y (or vice versa, not both)
+- **18,901 asymmetric pairs** — genuine causal direction, not symmetric correlation
+
+This matters for blast-radius ranking: if A → B (A causes B to change), then changing A should surface B at higher priority than changing B surfaces A. Static co-change tools rank both equally. Ripple doesn't.
+
+`get_why_context` exposes the causal direction per symbol. `get_blast_radius` uses it in the activity-weighted ranking.
+
 ### Guard — static semantic checks at 2.4ms/file
 
 AI-generated code passes every review gate because it *looks* correct. Guard verifies what it *claims*: checks that comments match the code that follows, that locks aren't released before promised mutations complete, that auth happens before action. Catches the class of bugs where the AI wrote a plausible lie.
