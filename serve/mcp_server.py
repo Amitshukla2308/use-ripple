@@ -103,30 +103,18 @@ def _startup():
 @mcp.tool()
 def search_symbols(query: str, service: str = "", brief: bool = False) -> str:
     """
-    Find functions, types, and modules by name or concept. ALWAYS start here.
+    Find functions, types, and modules by name or concept. Start here for any code question.
 
-    Decision guide:
-    - Use brief=True first to get an overview (~50 tokens/result, name + file only)
-    - Use brief=False when you need type signatures to understand interfaces
-    - Use service= to scope to one microservice and cut noise by 80%
-    - After finding an ID, call get_function_body() to read its implementation
-    - Found a module path? Call get_module() to see all symbols in it at once
-
-    If results look like test/harness code (file path contains "test", "spec", "harness",
-    "scenario", "mock"), do NOT jump to get_context. Instead:
-      → Retry with service= filter to skip test repos
-      → Or use a more specific query (e.g. "payment retry workflow" not "payment retry")
-      → Or call get_module() with the module prefix from the file paths you see
-
-    Examples:
-      search_symbols("payment retry", service="api-gateway") → scoped to one service
-      search_symbols("auth token validation") → finds relevant functions
-      search_symbols("database connection pool", brief=True) → quick overview
+    Use brief=True for orientation (name+file, ~50 tokens/result), brief=False for full signatures.
+    Use service= to scope to one microservice (cuts noise 80%).
+    After finding an ID → get_function_body(); found a module path → get_module().
+    If results are test/harness code, retry with service= filter or a more specific query before
+    falling back to get_context.
 
     Args:
-        query:   Natural language or code-style search (e.g. "user authentication handler")
-        service: Optional — restrict to one service (e.g. "api-gateway", "auth-service")
-        brief:   True = name+file only (~50 tokens/result). False = full signature (default)
+        query:   Natural language or identifier (e.g. "user authentication handler")
+        service: Optional — restrict to one service (e.g. "api-gateway")
+        brief:   True = name+file only. False = full signature (default)
     """
     return T.tool_search_symbols(query, service, brief)
 
@@ -249,21 +237,13 @@ def trace_callees(fn_id: str, reason: str = "") -> str:
 @mcp.tool()
 def get_blast_radius(files_or_modules: list[str], max_hops: int = 2) -> str:
     """
-    Compute blast radius for a set of changed files or modules.
+    Compute blast radius for changed files or modules.
 
-    Combines two signals:
-    - Import graph: which modules transitively import the changed ones
-    - Co-change history: which modules have historically changed together in git
-
-    Decision guide:
-    - Use BEFORE merging a PR or refactoring a module
-    - Pass git diff --name-only output directly (file paths auto-resolved)
-    - max_hops=1 for direct deps only, max_hops=2 (default) for transitive
-    - For a single function's impact, trace_callers is faster
-
-    Examples:
-      get_blast_radius(["api-gateway/src/routes.py"])
-      get_blast_radius(["Auth.Routes", "Payments.Checkout"])
+    Combines import graph (transitive dependents) + co-change history + cross-service Granger
+    causal predictions. Use before merging a PR or refactoring. Pass git diff --name-only output
+    directly — file paths are auto-resolved to modules.
+    max_hops=1 for direct deps, max_hops=2 (default) for transitive.
+    For single-function impact, trace_callers is faster.
 
     Args:
         files_or_modules: File paths (from git diff) or module names. Both work.
@@ -337,20 +317,9 @@ def predict_missing_changes(changed_files: list[str], min_confidence: float = 0.
     """
     Predict modules likely MISSING from a changeset (PR review assistant).
 
-    Given files changed in a PR, uses co-change history to predict what other
-    modules typically change together but are NOT in the changeset. High
-    confidence = "you almost certainly forgot this."
-
-    Use cases:
-    - PR review: "these files usually change together, did you forget one?"
-    - Pre-commit check: "your change touches X, you might also need to update Y"
-    - Refactoring: "changing this module historically requires changes to these others"
-
+    Uses co-change history + cross-service Granger causality to surface files that typically
+    change together but are absent from the PR. High confidence = almost certainly forgotten.
     Pass git diff --name-only output directly — file paths are auto-resolved.
-
-    Examples:
-      predict_missing_changes(["api-gateway/src/routes.py"])
-      predict_missing_changes(["Auth.Routes", "Payments.Flow"])
 
     Args:
         changed_files: File paths (from git diff) or module names. Both work.
@@ -837,31 +806,17 @@ def get_context(
     max_symbols: int = 0,
 ) -> str:
     """
-    Full codebase context retrieval — expensive, use sparingly.
+    Full codebase context retrieval — LAST RESORT, 5,000–18,000 tokens per call.
 
-    Runs vector + keyword search, pulls cluster summaries, entry points, and
-    doc chunks. Returns assembled context for cross-service architectural questions.
-    No inference happens here — this is context gathering only.
-
-    ⚠ LAST RESORT — 5,000–18,000 tokens per call. Hard rules:
-    1. You MUST have called search_symbols at least once before calling this.
-    2. You MUST have read at least one function body (get_function_body or get_module) first.
-    3. If search_symbols returned ANY results (even test code), retry with service= or a
-       different query before falling back here. "Results looked off" is not enough reason.
-    4. Never call get_context twice in the same turn under any circumstances.
-    5. With services= set, cost drops to ~2,000–4,000 tokens — always set it when possible.
-
-    You can answer almost every "how does X work" question WITHOUT get_context by:
-      search_symbols → get_module → get_function_body → trace_callees (follow the chain)
-
-    Only call get_context when: you have no function IDs to explore AND you need
-    cross-service cluster summaries that search_symbols cannot provide.
+    Runs vector + keyword search + cluster summaries across services. Only call when
+    search_symbols returned no useful IDs AND you need cross-service architectural context.
+    Rules: (1) Must have called search_symbols first. (2) Never call twice in one turn.
+    (3) Always set services= to cut tokens 50-80%.
 
     Args:
-        query:       Your question or topic (natural language)
-        persona:     Leave as default — only "default" is supported
-        services:    Limit to specific services — cuts tokens by 50-80%
-                     e.g. ["api-gateway", "auth-service"]
+        query:       Your question (natural language)
+        persona:     Leave as default
+        services:    Limit to specific services — cuts tokens 50-80% (e.g. ["api-gateway"])
         max_symbols: Cap symbols per service (0 = no cap). Use 20-30 for large queries.
     """
     # Use unified_search (RRF fusion of dense vector + BM25 + co-change expansion)
