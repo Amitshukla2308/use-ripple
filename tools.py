@@ -970,6 +970,14 @@ def tool_get_why_context(symbol_name: str) -> str:
         for cr in data["commit_rationale"]:
             lines.append(f"  [{cr.get('date','')}] {cr.get('msg','')[:160]}")
 
+    if data.get("bus_factor_warning"):
+        bfw = data["bus_factor_warning"]
+        lines.append(
+            f"\n⚠ Bus factor risk: {bfw['dominant_author']} owns {bfw['dominance_pct']}% of commits"
+            f" and this module has blast_radius={bfw['blast_radius']}."
+            f" Single-owner + high coupling — review this change carefully."
+        )
+
     return "\n".join(lines)
 
 

@@ -1755,6 +1755,7 @@ def get_why_context(symbol_name: str) -> dict:
         "causal_inputs": [],
         "anti_patterns": [],
         "commit_rationale": [],
+        "bus_factor_warning": None,
     }
 
     cc_key = _resolve_cc(symbol_name)
@@ -1781,6 +1782,18 @@ def get_why_context(symbol_name: str) -> dict:
             {"name": o.get("name", ""), "email": o.get("email", ""), "commits": o.get("commits", 0)}
             for o in owners[:3]
         ]
+        # Bus factor warning: solo-owned + high blast = specific risk intersection
+        total_commits = sum(o.get("commits", 0) for o in owners)
+        if total_commits > 0:
+            top = max(owners, key=lambda o: o.get("commits", 0))
+            top_pct = top.get("commits", 0) / total_commits
+            blast = len(cochange_index.get(cc_key) or cochange_index.get(symbol_name) or [])
+            if top_pct >= 0.90 and blast > 5:
+                result["bus_factor_warning"] = {
+                    "dominant_author": top.get("name", "unknown"),
+                    "dominance_pct": round(top_pct * 100),
+                    "blast_radius": blast,
+                }
 
     # Activity trend
     act = activity_index.get(symbol_name) or activity_index.get(mg_key)
