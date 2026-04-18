@@ -163,7 +163,7 @@ def _call_llm(comment: str, code: str, timeout: float = 10.0) -> tuple[str, str]
         m = re.search(r"VERDICT:\s*(ALIGNED|MISALIGNED|PARTIAL)", raw, re.IGNORECASE)
         if m:
             verdict = m.group(1).upper()
-            reason = raw[m.end():].strip()[:80]
+            reason = raw[m.end():].strip().split('\n')[0][:80]
         else:
             # Fallback: scan ONLY the last 300 chars with word boundaries
             # (avoids matching "MISALIGNED" in the task-description preamble)
@@ -171,7 +171,7 @@ def _call_llm(comment: str, code: str, timeout: float = 10.0) -> tuple[str, str]
             wm = re.search(r"\b(MISALIGNED|PARTIAL|ALIGNED)\b", tail, re.IGNORECASE)
             if wm:
                 verdict = wm.group(1).upper()
-                reason = tail[wm.end():].strip()[:80]
+                reason = tail[wm.end():].strip().split('\n')[0][:80]
             else:
                 verdict = "ERROR"
                 reason = raw[:80]
