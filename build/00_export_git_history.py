@@ -45,7 +45,7 @@ def export_repo(repo_path: pathlib.Path) -> list[dict]:
     # --name-only gives us changed file paths
     # --diff-filter=AMRC excludes deleted files
     result = subprocess.run(
-        ["git", "log", "--all", "--pretty=format:" + SEP + "%H" + FIELD_SEP + "%aI" + FIELD_SEP + "%aN" + FIELD_SEP + "%aE",
+        ["git", "log", "--all", "--pretty=format:" + SEP + "%H" + FIELD_SEP + "%aI" + FIELD_SEP + "%aN" + FIELD_SEP + "%aE" + FIELD_SEP + "%s",
          "--name-only", "--diff-filter=AMRC"],
         cwd=repo_path,
         capture_output=True,
@@ -72,10 +72,11 @@ def export_repo(repo_path: pathlib.Path) -> list[dict]:
             continue
 
         parts = header.split(FIELD_SEP)
-        commit_hash = parts[0].strip()
-        date = parts[1].strip() if len(parts) > 1 else ""
-        author_name = parts[2].strip() if len(parts) > 2 else ""
+        commit_hash  = parts[0].strip()
+        date         = parts[1].strip() if len(parts) > 1 else ""
+        author_name  = parts[2].strip() if len(parts) > 2 else ""
         author_email = parts[3].strip() if len(parts) > 3 else ""
+        message      = parts[4].strip() if len(parts) > 4 else ""
 
         files = []
         for line in lines[1:]:
@@ -89,6 +90,7 @@ def export_repo(repo_path: pathlib.Path) -> list[dict]:
                 "date": date,
                 "author_name": author_name,
                 "author_email": author_email,
+                "message": message,
                 "files_changed": files,
             })
 
