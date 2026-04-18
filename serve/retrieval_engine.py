@@ -53,6 +53,7 @@ reranker:      object = None   # CrossEncoder (ms-marco-MiniLM-L-6-v2, CPU) — 
 
 cluster_summaries:   dict  = {}
 cochange_index:      dict  = {}
+cochange_lastseen:   dict  = {}   # "min_cc_key::max_cc_key" → unix timestamp of last co-occurrence
 ownership_index:     dict  = {}   # module → [{"email","name","commits"}, ...]
 granger_index:       dict  = {}   # "A→B" → {"source","target","best_lag","p_value","f_statistic"}
 granger_cross_index: dict  = {}   # cross-service Granger, same schema, same key format
@@ -440,6 +441,13 @@ def initialize(
                       f"{xmeta.get('repo_pairs',0)} repo pairs")
 
             _build_cochange_name_map()
+
+            # Load co-change last-seen sidecar (T-039: query-time decay reranking)
+            lastseen_path = artifact_dir / "cochange_lastseen.json"
+            if lastseen_path.exists():
+                with open(str(lastseen_path)) as _f:
+                    cochange_lastseen.update(json.load(_f))
+                print(f"  lastseen sidecar: {len(cochange_lastseen):,} pairs loaded")
         else:
             print("  co-change index: not built yet")
 
@@ -635,6 +643,24 @@ def _build_cochange_name_map():
                 # Store even without MG match — useful for traversal results
                 _mg_to_cc[mg_name] = cc_key
     print(f"  Co-change name map: {len(_mg_to_cc):,} mg→cc, {len(_cc_to_mg):,} cc→mg")
+
+
+_DECAY_LAMBDA = math.log(2) / 180.0  # half-life = 180 days (T-034/T-039)
+
+def _cc_decay(cc_a: str, cc_b: str) -> float:
+    """Decay factor for a co-change pair based on days since last co-occurrence.
+
+    Returns 1.0 if lastseen data unavailable (neutral — no degradation).
+    T-034: applying this multiplier to flat weights gives +1.91pp recall@10.
+    """
+    if not cochange_lastseen:
+        return 1.0
+    key = (min(cc_a, cc_b) + "::" + max(cc_a, cc_b))
+    ts = cochange_lastseen.get(key)
+    if ts is None:
+        return 1.0
+    days = max(0.0, (time.time() - ts) / 86400.0)
+    return math.exp(-_DECAY_LAMBDA * days)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1164,7 +1190,7 @@ def predict_missing_changes(changed_modules: list, min_weight: int = 3,
         neighbors = cochange_index.get(cc_key, [])
         for nb in neighbors:
             nb_mod = _resolve_mg(nb["module"])
-            w = nb["weight"]
+            w = nb["weight"] * _cc_decay(cc_key, nb["module"])  # T-039 decay reranking
             if w < min_weight or nb_mod in changed_set:
                 continue
             if nb_mod not in candidate_evidence:
