@@ -1152,6 +1152,28 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
                 },
             }
 
+    # ── Foundation library detection ────────────────────────────────────
+    # A module that has direct (hop=1) imports from ≥3 different services
+    # is a foundation library — changes require org-wide coordination.
+    will_break_svcs = set(
+        item["service"] for item in tiered_list
+        if item.get("tier") == "will_break" and item.get("service")
+        and item.get("service") not in seed_services
+    )
+    foundation_library = None
+    if len(will_break_svcs) >= 3 and severity_counts.get("HIGH", 0) >= 50:
+        foundation_library = {
+            "is_foundation_library": True,
+            "directly_imported_by_services": sorted(will_break_svcs),
+            "service_count": len(will_break_svcs),
+            "warning": (
+                f"FOUNDATION LIBRARY: {len(will_break_svcs)} services have direct imports from "
+                f"this module. Changes require org-wide coordination — all dependent teams must "
+                f"review before merge."
+            ),
+        }
+    # ── End foundation library detection ────────────────────────────────
+
     result = {
         "seed_modules":       seed,
         "import_neighbors":   import_neighbors,
@@ -1160,6 +1182,8 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
         "tiered_impact":      tiered_list,
         "severity_summary":   severity_counts,
     }
+    if foundation_library:
+        result["foundation_library"] = foundation_library
     if community_context:
         result["community_context"] = community_context
     return result
