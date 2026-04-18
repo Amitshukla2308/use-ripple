@@ -1,0 +1,109 @@
+{
+  "name": "ripple-mcp",
+  "version": "0.6.0",
+  "description": "Codebase intelligence MCP server. Indexes source code into a graph + vector store, then exposes retrieval, blast-radius analysis, co-change prediction, criticality scoring, and AI guardrails as MCP tools for IDE-embedded LLMs.",
+  "homepage": "https://github.com/Amitshukla2308/use-ripple",
+  "license": "Apache-2.0",
+  "categories": ["code-intelligence", "developer-tools", "static-analysis"],
+  "keywords": ["code-search", "blast-radius", "co-change", "criticality", "guardrails", "haskell", "rust", "typescript"],
+  "publisher": {
+    "name": "Amit Shukla",
+    "url": "https://github.com/Amitshukla2308"
+  },
+  "_meta": {
+    "generated_by": "Carlsbert (autonomous Claude agent)",
+    "date": "2026-04-18"
+  },
+  "packages": [
+    {
+      "type": "pypi",
+      "name": "ripple-mcp",
+      "version": "0.6.0"
+    }
+  ],
+  "remotes": [
+    {
+      "type": "sse",
+      "url": "https://hr.tunnelthemvp.in/sse",
+      "description": "Public demo endpoint (Juspay fintech codebase, 148K symbols)"
+    }
+  ],
+  "tools": [
+    {
+      "name": "search_symbols",
+      "description": "Semantic + keyword search for functions, types, and modules across indexed codebases"
+    },
+    {
+      "name": "search_modules",
+      "description": "Search for module namespaces by concept or keyword"
+    },
+    {
+      "name": "get_module",
+      "description": "List all symbols in a module with summaries"
+    },
+    {
+      "name": "get_function_body",
+      "description": "Fetch source code of a function by fully-qualified ID"
+    },
+    {
+      "name": "trace_callers",
+      "description": "Find all functions that call a given function (upstream impact)"
+    },
+    {
+      "name": "trace_callees",
+      "description": "List all functions called by a given function (downstream deps)"
+    },
+    {
+      "name": "get_blast_radius",
+      "description": "Import graph + co-change history for changed files. Includes cross-service Granger causal predictions."
+    },
+    {
+      "name": "predict_missing_changes",
+      "description": "PR review: detect files likely missing from a changeset using Granger causality"
+    },
+    {
+      "name": "check_my_changes",
+      "description": "SDLC guardian: blast_radius + missing changes + risk score + security scan + reviewers in one call"
+    },
+    {
+      "name": "suggest_reviewers",
+      "description": "Module ownership from git history — who should review changes to these files?"
+    },
+    {
+      "name": "score_change_risk",
+      "description": "Composite risk score (0-100) from blast radius, coverage gap, reviewer concentration, service spread"
+    },
+    {
+      "name": "check_criticality",
+      "description": "Criticality score + signals (blast radius, co-change coupling, bus factor, churn) for any module"
+    },
+    {
+      "name": "get_guardrails",
+      "description": "AI-generated guardrail doc for critical modules: invariants, what breaks, who must review"
+    },
+    {
+      "name": "list_critical_modules",
+      "description": "Ranked critical modules for a service above a criticality threshold"
+    },
+    {
+      "name": "fast_search",
+      "description": "Zero-GPU BM25 keyword search, <50ms. Best for identifier/name lookups."
+    },
+    {
+      "name": "fast_search_reranked",
+      "description": "BM25 top-30 with cross-encoder reranking. P@10=0.900, p95=84ms."
+    },
+    {
+      "name": "search_requirements",
+      "description": "Search for functional requirement clusters matching behavioral/flow questions (How does X work?)"
+    },
+    {
+      "name": "get_why_context",
+      "description": "WHY context: ownership, activity trend, Granger causal direction, anti-pattern flags"
+    },
+    {
+      "name": "get_context",
+      "description": "Full semantic context for a query (5k-18k tokens). Last resort after targeted tools."
+    }
+  ]
+}
