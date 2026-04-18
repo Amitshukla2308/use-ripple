@@ -12,6 +12,8 @@ Works inside **Claude Code · Cursor · GitHub Copilot Agent · OpenHands · Win
 Static analysis tells you what *could* break. Git history tells you what *actually* breaks together. The gap between those two is where production incidents live — and where Ripple operates.
 
 > **Looking for a free Cody alternative?** Sourcegraph Cody dropped its free and pro plans in April 2026. Ripple is self-hosted, free, Apache-2.0, and adds a signal Cody never had: temporal co-change intelligence from your git history. No enterprise contract. No data leaves your machine.
+>
+> **Claude Code users**: Ripple works natively as an MCP server in Claude Code. Anthropic stopped Claude Pro/Max subscriptions from working in Cursor, Windsurf, and Cline in April 2026 — Claude Code is now the recommended path for Claude-powered development. Ripple is a first-class citizen there.
 
 ---
 
