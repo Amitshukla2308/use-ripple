@@ -1097,6 +1097,40 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
     tiered_list = sorted(tiered.values(), key=lambda x: -x["confidence"])
     # ── End tiered impact ───────────────────────────────────────────────
 
+    # ── Granger-exclusive tier (causal predictions outside import+co-change graph) ─
+    granger_exclusive_blast: list = []
+    if granger_index or granger_cross_index:
+        seed_cc = {_resolve_cc(s) for s in seed}
+        tiered_set = {item["module"] for item in tiered_list}
+        seen_ge: dict = {}
+        for gi in (granger_index, granger_cross_index):
+            for g in gi.values():
+                src = g.get("source", "")
+                if src not in seed_cc:
+                    continue
+                tgt_cc = g.get("target", "")
+                tgt_mg = _resolve_mg(tgt_cc)
+                if tgt_mg in seed or tgt_mg in tiered_set:
+                    continue
+                pv = g.get("p_value", 1.0)
+                if existing := seen_ge.get(tgt_mg):
+                    if pv >= existing["p_value"]:
+                        continue
+                svc = ""
+                if MG is not None and tgt_mg in MG.nodes:
+                    svc = MG.nodes[tgt_mg].get("service", "")
+                seen_ge[tgt_mg] = {
+                    "module": tgt_mg,
+                    "source": _resolve_mg(src),
+                    "p_value": pv,
+                    "f_statistic": g.get("f_statistic", 0.0),
+                    "lag": g.get("best_lag", 1),
+                    "strength": "strong" if pv < 0.01 else "moderate",
+                    "service": svc,
+                }
+        granger_exclusive_blast = sorted(seen_ge.values(), key=lambda x: -x["f_statistic"])[:3]
+    # ── End Granger-exclusive tier ─────────────────────────────────────────
+
     # ── Community context (if available) ────────────────────────────────
     community_context = None
     if module_to_community:
@@ -1136,6 +1170,8 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
     }
     if community_context:
         result["community_context"] = community_context
+    if granger_exclusive_blast:
+        result["granger_exclusive_predictions"] = granger_exclusive_blast
     return result
 
 
