@@ -969,6 +969,7 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
     """
     seed = [m for m in module_names if m]
     affected_services: set = set()
+    seed_services:     set = set()  # services of the seed modules (for T-017 severity tiering)
     import_neighbors = []
     cochange_neighbors = []
 
@@ -978,6 +979,7 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
                 svc = MG.nodes[m].get("service","")
                 if svc:
                     affected_services.add(svc)
+                    seed_services.add(svc)
         for mod, info in module_graph_expand(seed, depth=max_hops).items():
             import_neighbors.append({
                 "module": mod, "service": info.get("service",""),
@@ -1095,6 +1097,17 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
                 tiered[mod]["signals"]["granger"] = granger_info
 
     tiered_list = sorted(tiered.values(), key=lambda x: -x["confidence"])
+
+    # T-017 finding: cross-service causal pairs are ~97.7% cross-owner vs intra-service 9.1%.
+    # Tag each impact entry so PR reviewers know which warnings require cross-team coordination.
+    if seed_services:
+        for item in tiered_list:
+            item_svc = item.get("service", "")
+            is_cross = bool(item_svc and item_svc not in seed_services)
+            item["severity"] = "HIGH" if is_cross else "MEDIUM"
+            if is_cross:
+                item["cross_team_note"] = "cross-service — always requires cross-team coordination"
+
     # ── End tiered impact ───────────────────────────────────────────────
 
     # ── Community context (if available) ────────────────────────────────
