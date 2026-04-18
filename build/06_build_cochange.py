@@ -19,18 +19,18 @@ BUILD_TIME = time.time()
 
 
 def parse_ts(value) -> float | None:
+    """Parse any reasonable timestamp to unix float. Handles +05:30, Z, date-only."""
     try:
         if isinstance(value, (int, float)):
             return float(value)
         ts = str(value).strip()
-        for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S %z", "%Y-%m-%d"):
-            try:
-                dt = datetime.strptime(ts[:len(fmt) + 5], fmt)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                return dt.timestamp()
-            except ValueError:
-                continue
+        # Normalize Z suffix to +00:00 for fromisoformat (Python <3.11 doesn't handle Z)
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
     except Exception:
         pass
     return None
@@ -175,7 +175,7 @@ def build():
         filtered = sorted(
             [{"module": m, "weight": w, "decay_weight": round(cochange_decay[mod].get(m, 0.0), 4)}
              for m, w in partners.items() if w >= MIN_WEIGHT],
-            key=lambda x: -x["decay_weight"]  # sort by decay signal; flat weight used only for gating
+            key=lambda x: -x["weight"]  # sort by flat count for coverage; decay_weight used at query time
         )[:TOP_K]
         if filtered:
             edges[mod] = filtered

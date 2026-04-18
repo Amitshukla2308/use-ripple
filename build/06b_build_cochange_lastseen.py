@@ -58,13 +58,12 @@ def parse_ts(value) -> float | None:
         if isinstance(value, (int, float)):
             return float(value)
         ts = str(value).strip()
-        for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S %z", "%Y-%m-%d"):
-            try:
-                dt = datetime.strptime(ts[:len(fmt) + 5], fmt)
-                if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
-                return dt.timestamp()
-            except ValueError:
-                continue
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
     except Exception:
         pass
     return None
