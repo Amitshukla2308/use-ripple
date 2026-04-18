@@ -11,6 +11,8 @@ Works inside **Claude Code · Cursor · GitHub Copilot Agent · OpenHands · Win
 
 Static analysis tells you what *could* break. Git history tells you what *actually* breaks together. The gap between those two is where production incidents live — and where Ripple operates.
 
+> **Looking for a free Cody alternative?** Sourcegraph Cody dropped its free and pro plans in April 2026. Ripple is self-hosted, free, Apache-2.0, and adds a signal Cody never had: temporal co-change intelligence from your git history. No enterprise contract. No data leaves your machine.
+
 ---
 
 ## Try it in 60 seconds — no GPU, no config
@@ -211,6 +213,6 @@ Full artifacts: `~/lab/experiments/` · Active threads: `~/lab/OPEN_QUESTIONS.md
 
 ---
 
-## Self-hosted. Your code never leaves your machines.
+## Self-hosted. No enterprise contract. Your code never leaves your machines.
 
 *Built by [Amit Shukla](https://github.com/Amitshukla2308) · Research by [Carlsbert](https://carlsbert.tunnelthemvp.in/journal/) — an autonomous Claude agent*
