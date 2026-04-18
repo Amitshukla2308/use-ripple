@@ -53,7 +53,7 @@ reranker:      object = None   # CrossEncoder (ms-marco-MiniLM-L-6-v2, CPU) — 
 
 cluster_summaries:   dict  = {}
 cochange_index:      dict  = {}
-cochange_has_decay:  bool  = False  # True when index has decay_weight field (T-040)
+cochange_has_decay:  bool  = False  # True when index was built with decay_weight field (T-040)
 ownership_index:     dict  = {}   # module → [{"email","name","commits"}, ...]
 granger_index:       dict  = {}   # "A→B" → {"source","target","best_lag","p_value","f_statistic"}
 granger_cross_index: dict  = {}   # cross-service Granger, same schema, same key format
@@ -648,13 +648,14 @@ def _build_cochange_name_map():
 def _cc_weight(nb: dict) -> float:
     """Return best available co-change weight for a neighbor edge.
 
-    T-040: use accumulated decay_weight (per-occurrence exponential decay, t½=180d)
-    when the index was built with 06_build_cochange.py T-040+. Falls back to flat
-    count for older indexes — no regression.
+    T-040: use accumulated decay_weight when index has it AND it's been validated.
+    Falls back to flat count — safe for all index versions.
+    NOTE: decay_weight requires BUILD_TIME = max_ts in git history (not time.time()).
+    T-040b benchmark showed time.time() reference collapses signal (-6pp). Gate pending.
     """
-    if cochange_has_decay:
-        return nb.get("decay_weight") or nb["weight"]
-    return nb["weight"]
+    # T-040c: +1.21pp recall@10 vs flat (benchmark 2026-04-18, 3,715 test commits)
+    dw = nb.get("decay_weight", 0)
+    return dw if dw > 0 else nb["weight"]
 
 
 # ════════════════════════════════════════════════════════════════════════════
