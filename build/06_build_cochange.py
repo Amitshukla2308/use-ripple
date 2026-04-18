@@ -6,15 +6,46 @@ Handles truncated/incomplete JSON files gracefully — writes partial results.
 """
 import argparse, json, math, pathlib, sys, time
 from collections import defaultdict
+from datetime import datetime, timezone
 from itertools import combinations
-
-HALF_LIFE_DAYS = 180.0  # 6-month half-life for exponential decay
-_REF_TS = time.time()   # reference timestamp (build time)
 
 try:
     import ijson
 except ImportError:
     raise SystemExit("pip install ijson")
+
+HALF_LIFE_DAYS = 180.0  # 6-month half-life for exponential decay
+_REF_TS: float = 0.0    # set in build() after GIT_HISTORY is known
+
+
+def _find_max_ts(path) -> float:
+    """Quick pre-scan: find the latest commit timestamp in git_history.json."""
+    max_ts = 0.0
+    try:
+        with open(path, "rb") as f:
+            for prefix, event, value in ijson.parse(f, use_float=True):
+                if event in ("number", "string") and prefix.endswith(
+                    (".timestamp", ".date", ".authored_date")
+                ):
+                    try:
+                        ts = float(value) if isinstance(value, (int, float)) else None
+                        if ts is None:
+                            for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ",
+                                        "%Y-%m-%d %H:%M:%S %z"):
+                                try:
+                                    dt = datetime.strptime(str(value)[:25], fmt[:25])
+                                    if dt.tzinfo is None:
+                                        dt = dt.replace(tzinfo=timezone.utc)
+                                    ts = dt.timestamp(); break
+                                except ValueError:
+                                    pass
+                        if ts and ts > max_ts:
+                            max_ts = ts
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return max_ts if max_ts > 0 else time.time()
 
 parser = argparse.ArgumentParser(description="Build co-change index from git history")
 parser.add_argument("--git-history", type=pathlib.Path,
@@ -76,6 +107,11 @@ def _decay(ts_value) -> float:
 
 
 def build():
+    global _REF_TS
+    print("Pre-scanning git history for max timestamp...", flush=True)
+    _REF_TS = _find_max_ts(str(GIT_HISTORY))
+    print(f"  REF_TS = {_REF_TS:.0f} ({datetime.fromtimestamp(_REF_TS).strftime('%Y-%m-%d')})", flush=True)
+
     cochange       = defaultdict(lambda: defaultdict(int))
     cochange_decay = defaultdict(lambda: defaultdict(float))
     total_commits = 0
