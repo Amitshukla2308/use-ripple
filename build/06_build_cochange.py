@@ -4,9 +4,40 @@ Stage 6 — Build evolutionary coupling graph from git history.
 Streams one commit at a time (O(1) memory).
 Handles truncated/incomplete JSON files gracefully — writes partial results.
 """
-import argparse, json, pathlib, sys
+import argparse, json, math, pathlib, sys
 from collections import defaultdict
+from datetime import datetime, timezone
 from itertools import combinations
+
+# Exponential decay: weight = exp(-ln2 / half_life * days_ago)
+# Half-life of 180 days means a co-change 6 months ago has half the weight of one today.
+# T-034 benchmark: decay-weighted recall@10 = 0.4682 vs flat 0.4491 (+1.91pp)
+_DECAY_HALF_LIFE_DAYS = 180
+_DECAY_LAMBDA = math.log(2) / _DECAY_HALF_LIFE_DAYS
+_REF_DATE = datetime.now(tz=timezone.utc)  # set at process start; stable within one run
+
+
+def _decay_weight(timestamp_value) -> float:
+    """Convert a commit timestamp (int unix, or ISO string) to decay weight [0, 1]."""
+    try:
+        if isinstance(timestamp_value, (int, float)):
+            dt = datetime.fromtimestamp(float(timestamp_value), tz=timezone.utc)
+        else:
+            ts = str(timestamp_value).strip()
+            dt = None
+            for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S %z", "%Y-%m-%d"):
+                try:
+                    parsed = datetime.strptime(ts[:len(fmt) + 2], fmt)
+                    dt = parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+                    break
+                except ValueError:
+                    continue
+            if dt is None:
+                return 1.0
+        days = max(0, (_REF_DATE - dt).days)
+        return math.exp(-_DECAY_LAMBDA * days)
+    except Exception:
+        return 1.0
 
 try:
     import ijson
@@ -52,7 +83,7 @@ def to_module(repo: str, fpath: str) -> str:
 
 
 def build():
-    cochange = defaultdict(lambda: defaultdict(int))
+    cochange = defaultdict(lambda: defaultdict(float))
     total_commits = 0
     skipped       = 0
     current_repo  = None
@@ -75,8 +106,15 @@ def build():
 
                 # Detect commit start
                 if prefix == "repositories.item.commits.item" and event == "start_map":
-                    in_commit    = True
-                    commit_files = []
+                    in_commit        = True
+                    commit_files     = []
+                    commit_timestamp = None
+                    continue
+
+                # Capture commit timestamp for decay weighting
+                if in_commit and prefix.endswith((".timestamp", ".date", ".authored_date")) and event in ("string", "number"):
+                    if commit_timestamp is None:
+                        commit_timestamp = value
                     continue
 
                 # Collect only files_changed paths (ignore diff/body/other fields)
@@ -92,9 +130,10 @@ def build():
 
                     if 2 <= len(commit_files) <= MAX_FILES and current_repo:
                         mods = [to_module(current_repo, fp) for fp in commit_files]
+                        w = _decay_weight(commit_timestamp)
                         for a, b in combinations(mods, 2):
-                            cochange[a][b] += 1
-                            cochange[b][a] += 1
+                            cochange[a][b] += w
+                            cochange[b][a] += w
                     elif len(commit_files) > MAX_FILES:
                         skipped += 1
 
