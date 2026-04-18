@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ripple"
+name = "ripple-mcp"
 version = "0.6.0"
 description = "Self-hosted codebase intelligence platform — graph + vector indexing with MCP tools for IDE-embedded LLMs"
 readme = "README.md"
@@ -78,7 +78,7 @@ web = [
 ]
 # Everything
 all = [
-    "ripple[build,grammars,chat,mcp,embeddings,search,web]",
+    "ripple-mcp[build,grammars,chat,mcp,embeddings,search,web]",
 ]
 
 [project.scripts]
