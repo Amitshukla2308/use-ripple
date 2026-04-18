@@ -2129,6 +2129,95 @@ def _apply_criticality_boost(merged: dict) -> dict:
     return boosted
 
 
+_IMPACT_REVIEW_TOKENS = frozenset([
+    "affected", "affect", "affects", "blast", "radius", "impact", "impacts",
+    "change", "changes", "changed", "modif", "modifies", "modified",
+    "review", "reviewer", "reviewers", "together", "co-change", "cochange",
+    "missing", "what else", "cascade", "downstream", "upstream",
+    "dependency", "dependencies", "dependent",
+])
+
+
+def _detect_query_intent(query: str) -> str:
+    """Classify query as 'impact', 'review', 'search', or 'understanding'.
+
+    Used to gate query-specific boosts. Impact/review queries benefit from
+    co-change hub signals; search/understanding queries do not.
+    """
+    q = query.lower()
+    tokens = set(q.split())
+    # check multi-word patterns first
+    if "what else" in q or "blast radius" in q or "change together" in q:
+        return "impact"
+    if any(t in tokens for t in ("affected", "affect", "affects", "impact",
+                                  "impacts", "cascade", "downstream", "radius")):
+        return "impact"
+    if any(t in tokens for t in ("review", "reviewer", "reviewers", "who",
+                                  "missing", "together", "cochange")):
+        return "review"
+    if any(t in tokens for t in ("how", "why", "explain", "describe",
+                                  "understand", "flow", "works", "work")):
+        return "understanding"
+    # "what" alone is too broad (e.g. "what modules handle X" = search)
+    # only treat as understanding when paired with understanding verbs
+    if "what" in tokens and any(t in tokens for t in ("does", "do", "is", "are",
+                                                        "happens", "happen", "mean")):
+        return "understanding"
+    return "search"
+
+
+def _node_cochange_score(node: dict) -> float:
+    """[0,1] co-change hub score: degree / 30 (artifact max degree = 30)."""
+    if not cochange_index:
+        return 0.0
+    candidates = []
+    for field in ("module", "name", "id"):
+        v = node.get(field)
+        if v:
+            candidates.append(v)
+            try:
+                rv = _resolve_cc(v)
+                if rv != v:
+                    candidates.append(rv)
+            except Exception:
+                pass
+    for key in candidates:
+        pairs = cochange_index.get(key)
+        if pairs:
+            return min(1.0, len(pairs) / 30.0)
+    return 0.0
+
+
+def _apply_change_prediction_boost(merged: dict, intent: str) -> dict:
+    """Rerank by co-change hub score — ONLY for impact/review queries.
+
+    Uses degree/30 normalization (artifact max=30). Compounds with criticality
+    boost (reads _rrf_boosted if present). No-op for search/understanding.
+    Controlled by HR_COCHANGE_BOOST (default "1"), HR_CC_ALPHA (default "0.4").
+    """
+    if intent not in ("impact", "review"):
+        return merged
+    if not cochange_index or os.environ.get("HR_COCHANGE_BOOST", "1") == "0":
+        return merged
+    try:
+        alpha = float(os.environ.get("HR_CC_ALPHA", "0.4"))
+    except ValueError:
+        alpha = 0.4
+
+    boosted: dict = {}
+    for svc, nodes in merged.items():
+        rescored = []
+        for node in nodes:
+            base = float(node.get("_rrf_boosted", node.get("_rrf_score", 0.0)))
+            cc = _node_cochange_score(node)
+            score = base * (1.0 + alpha * cc)
+            new_node = {**node, "_cc_score": cc, "_cc_boosted": score}
+            rescored.append(new_node)
+        rescored.sort(key=lambda n: -n.get("_cc_boosted", 0.0))
+        boosted[svc] = rescored
+    return boosted
+
+
 def unified_search(queries: list, k_total: int = 250) -> dict:
     """
     Primary search entry point. Fuses dense vector + BM25 + co-change via RRF.
@@ -2158,6 +2247,10 @@ def unified_search(queries: list, k_total: int = 250) -> dict:
 
     # Criticality-aware rerank: boost modules that are risk-scored high
     merged = _apply_criticality_boost(merged)
+
+    # Co-change hub boost: only for impact/review queries (hubs = infra hubs for change propagation)
+    _intent = _detect_query_intent(queries[0] if queries else "")
+    merged = _apply_change_prediction_boost(merged, _intent)
 
     # Cross-encoder rerank (off by default; HR_RERANKER=bge to enable)
     try:
