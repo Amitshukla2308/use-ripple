@@ -1252,6 +1252,10 @@ async def _react_loop(messages: list, query: str, tool_log: list, t_query: float
 
         tool_results  = []
         loop_detected = False
+
+        # ── Pass 1: guards and loop detection (sequential, order-sensitive) ──
+        _TOOL_TIMEOUT   = 45
+        executable_tcs  = []   # (tc, fn_name, args) that passed all guards
         for tc in assistant_msg.tool_calls:
             fn_name  = tc.function.name
             args_raw = tc.function.arguments
@@ -1265,7 +1269,7 @@ async def _react_loop(messages: list, query: str, tool_log: list, t_query: float
             if seen_calls[call_key] >= MAX_SAME_CALL:
                 loop_detected = True
 
-            # ── get_context early-use guard ──────────────────────────────────
+            # get_context early-use guard
             if fn_name == "get_context" and tool_calls_count < CTX_MIN_PRIOR_CALLS:
                 tool_results.append({"role": "tool", "tool_call_id": tc.id,
                     "content": (f"[GUIDANCE] get_context was called after only "
@@ -1278,53 +1282,56 @@ async def _react_loop(messages: list, query: str, tool_log: list, t_query: float
                 continue
 
             tool_calls_count += 1
+            executable_tcs.append((tc, fn_name, args))
+
+        # ── Pass 2: parallel dispatch for all executable tools ───────────────
+        async def _dispatch_with_retry(fn_name, args):
+            """Returns (result_str, error_detail_or_None)."""
+            dispatcher = _CHAT_DISPATCH.get(fn_name)
+            if not dispatcher:
+                return f"Unknown tool: {fn_name}", None
+            _last_exc: str | None = None
+            for _attempt in range(2):
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(dispatcher, args), timeout=_TOOL_TIMEOUT)
+                    return result, None
+                except asyncio.TimeoutError:
+                    return "Tool timed out — try narrower or more specific arguments.", "timeout"
+                except Exception as exc:
+                    _last_exc = str(exc)
+                    if _attempt == 0:
+                        await asyncio.sleep(0.3)
+                        continue
+                    return "Tool returned an error. Try rephrasing or use a different tool.", _last_exc
+            return "Tool returned an error.", _last_exc
+
+        raw_results = await asyncio.gather(
+            *[_dispatch_with_retry(fn, a) for _, fn, a in executable_tcs]
+        )
+
+        # ── Pass 3: render steps and post-process in order ───────────────────
+        session_id = cl.user_session.get("session_id", "?")
+        for (tc, fn_name, args), (result, last_exc) in zip(executable_tcs, raw_results):
             async with cl.Step(name=_step_name(fn_name, args), type="tool",
                                show_input=False) as step:
-                dispatcher = _CHAT_DISPATCH.get(fn_name)
-                if not dispatcher:
-                    result = f"Unknown tool: {fn_name}"
-                    step.output = result
-                else:
-                    _TOOL_TIMEOUT = 45
-                    _last_exc: str | None = None
-                    result = None
-                    for _attempt in range(2):
-                        try:
-                            result = await asyncio.wait_for(
-                                asyncio.to_thread(dispatcher, args),
-                                timeout=_TOOL_TIMEOUT,
-                            )
-                            break
-                        except asyncio.TimeoutError:
-                            result = "Tool timed out — try narrower or more specific arguments."
-                            step.is_error = True
-                            break
-                        except Exception as exc:
-                            _last_exc = str(exc)
-                            if _attempt == 0:
-                                await asyncio.sleep(0.3)   # brief pause before retry
-                                continue
-                            # Sanitize: show full detail in UI dropdown, send terse message to LLM
-                            result = "Tool returned an error. Try rephrasing or use a different tool."
-                            step.is_error = True
-                    # Step dropdown shows full detail; `result` going to LLM is already sanitized
-                    step.output = f"{result}\n\n[detail: {_last_exc}]" if _last_exc else result
+                step.output = f"{result}\n\n[detail: {last_exc}]" if last_exc else result
+                if last_exc:
+                    step.is_error = True
 
             status = _classify_result(result)
             entry = {
                 "tool":    fn_name,
                 "args":    args,
                 "status":  status,
-                "result":  result,       # full result logged
+                "result":  result,
                 "preview": result[:200] if result else "",
                 "len":     len(result) if result else 0,
             }
             tool_log.append(entry)
-            _log_step(cl.user_session.get("session_id", "?"), query,
-                      tool_calls_count, entry)
+            _log_step(session_id, query, tool_calls_count, entry)
             tool_results.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
-            # ── Empty streak tracking ─────────────────────────────────────────
             if status == "useful":
                 consecutive_empty = 0
             else:

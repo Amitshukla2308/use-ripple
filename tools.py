@@ -243,7 +243,12 @@ AGENT_TOOLS = [
             "Use this when:\n"
             "- Assessing blast radius: who is affected if this function changes?\n"
             "- Finding entry points: who initiates this operation?\n"
-            "- Debugging: where is this function being called from in an unexpected way?\n\n"
+            "- Debugging: where is this function being called from in an unexpected way?\n"
+            "- **Lock / resource lifecycle analysis**: if a function acquires a lock but has no "
+            "release call in its own body, call trace_callers to check whether the caller "
+            "framework handles cleanup (many handler frameworks release resources for you). "
+            "Reporting a missing lock release WITHOUT calling trace_callers first is an "
+            "incorrect analysis.\n\n"
             "The result shows callers across all services — pay attention to cross-service calls "
             "as they represent contract boundaries."
         ),
