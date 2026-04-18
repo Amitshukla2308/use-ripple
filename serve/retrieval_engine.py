@@ -62,6 +62,7 @@ activity_index:      dict  = {}   # module_name → {"activity_score", "activity
 criticality_index:   dict  = {}   # module_name → {"score", "rank", "signals", "reasons"}
 guardrails_index:    dict  = {}   # module_name → {"file", "score", ...}
 guardrails_content:  dict  = {}   # module_name → guardrail markdown text
+lore_index:          dict  = {}   # module_name → [{"key","value","commit","date"}, ...]
 file_to_nodes:       dict  = {}   # module_name → [node_id, ...]
 filepath_to_module:  dict  = {}   # relative_file_path → module_name
 _cochange_loaded_at: float = 0.0
@@ -236,7 +237,7 @@ def initialize(
     """
     global embedder, _llm_client, G, MG, lance_tbl, cluster_summaries
     global body_store, call_graph, log_patterns, doc_chunks, doc_by_id, gw_integrity
-    global doc_lance_tbl, _cochange_loaded_at, _idf
+    global doc_lance_tbl, _cochange_loaded_at, _idf, lore_index
 
     if config_path:
         load_config(config_path)
@@ -532,6 +533,47 @@ def initialize(
                 content = gf.read_text()
                 guardrails_content[gf.stem] = content
             print(f"  {len(guardrails_content)} guardrail documents loaded")
+
+        # Load Lore index — explicit developer decision records from Lore-* git trailers
+        _lore_path = artifact_dir / "lore_index.json"
+        _gh_path   = artifact_dir.parent / "git_history.json"
+        if _lore_path.exists():
+            print("Loading lore index...")
+            with open(str(_lore_path)) as _f:
+                lore_index.update(json.load(_f))
+            print(f"  {len(lore_index)} modules with Lore records")
+        elif _gh_path.exists():
+            _lore_re = re.compile(r"^Lore-([A-Za-z]+):\s*(.+)$", re.MULTILINE)
+            _lore_raw: dict = {}
+            try:
+                with open(str(_gh_path)) as _f:
+                    _gh_data = json.load(_f)
+                for _repo in _gh_data.get("repositories", []):
+                    _rname = _repo.get("name", "")
+                    for _c in _repo.get("commits", []):
+                        _text = "\n".join(filter(None, [
+                            _c.get("message", ""), _c.get("body", ""), _c.get("footer", ""),
+                        ]))
+                        if "Lore-" not in _text:
+                            continue
+                        _date = str(_c.get("date") or _c.get("timestamp", ""))[:10]
+                        _sha  = _c.get("hash", _c.get("sha", ""))[:8]
+                        for _fp in _c.get("files_changed", []):
+                            _mod = (_fp.get("path", "") if isinstance(_fp, dict) else str(_fp))
+                            if not _mod:
+                                continue
+                            _key = f"{_rname}::{_mod}"
+                            for _m in _lore_re.finditer(_text):
+                                _lore_raw.setdefault(_key, []).append({
+                                    "key": _m.group(1), "value": _m.group(2).strip(),
+                                    "commit": _sha, "date": _date,
+                                })
+                lore_index.update(_lore_raw)
+                if lore_index:
+                    _n_recs = sum(len(v) for v in lore_index.values())
+                    print(f"  Parsed {_n_recs} Lore records from git history")
+            except Exception as _e:
+                print(f"  Lore parse skipped: {_e}")
 
         # Inject synthetic co-change edges from call_graph (cold-start fix)
         if call_graph and cochange_index is not None:
@@ -1743,6 +1785,7 @@ def get_why_context(symbol_name: str) -> dict:
         "causal_outputs": [],
         "causal_inputs": [],
         "anti_patterns": [],
+        "lore_signals": [],
     }
 
     cc_key = _resolve_cc(symbol_name)
@@ -1842,6 +1885,15 @@ def get_why_context(symbol_name: str) -> dict:
             "this code is reactive. Consider stabilising its interface."
         )
     result["anti_patterns"] = anti
+
+    # Lore signals — explicit developer rationale from Lore-* git trailers
+    _lore = (lore_index.get(symbol_name)
+             or lore_index.get(cc_key)
+             or lore_index.get(mg_key)
+             or [])
+    if _lore:
+        result["found"] = True
+        result["lore_signals"] = _lore[:10]
 
     return result
 

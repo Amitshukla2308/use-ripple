@@ -965,6 +965,11 @@ def tool_get_why_context(symbol_name: str) -> str:
         for ap in data["anti_patterns"]:
             lines.append(f"  ⚠  {ap}")
 
+    if data.get("lore_signals"):
+        lines.append("\nLore records (explicit developer rationale):")
+        for ls in data["lore_signals"]:
+            lines.append(f"  [{ls['key']}] {ls['value']}  ({ls.get('date','')} {ls.get('commit','')})")
+
     return "\n".join(lines)
 
 
