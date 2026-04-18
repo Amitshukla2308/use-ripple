@@ -9,6 +9,8 @@
 
 Works inside **Claude Code · Cursor · GitHub Copilot Agent · OpenHands · Windsurf**
 
+> Looking for a GitNexus alternative? Ripple adds what GitNexus can't: co-change history, Granger causal direction, and blast radius from 100K+ real commits — not just the AST.
+
 Static analysis tells you what *could* break. Git history tells you what *actually* breaks together. The gap between those two is where production incidents live — and where Ripple operates.
 
 ---
