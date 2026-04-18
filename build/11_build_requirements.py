@@ -49,16 +49,33 @@ KIMI_KEY   = os.environ.get("KIMI_API_KEY")
 KIMI_BASE  = os.environ.get("KIMI_BASE_URL", "https://grid.ai.juspay.net/v1")
 KIMI_MODEL = os.environ.get("KIMI_MODEL", "kimi-latest")
 
+BEHAVIOR_TAG_VOCAB = [
+    "retry", "idempotency", "settlement", "reconciliation",
+    "authentication", "authorization", "routing", "validation",
+    "persistence", "caching", "logging", "monitoring", "notifications",
+    "transformation", "orchestration", "event-handling", "error-handling",
+    "rate-limiting", "circuit-breaking", "deduplication", "locking",
+]
+
 EXTRACT_SYS = (
     "You extract functional requirements from code artifacts. "
     "A functional requirement describes WHAT a module does for users of the system, "
-    "not how it is implemented. Write exactly one sentence starting with a verb. "
-    "Example: 'Validates JWT tokens and gates incoming API requests.'"
+    "not how it is implemented. "
+    "Also identify any cross-cutting behavioral concerns present in the implementation.\n\n"
+    "Behavior tag vocabulary (use ONLY tags from this list):\n"
+    + ", ".join(BEHAVIOR_TAG_VOCAB) + "\n\n"
+    "Output a JSON object with exactly two fields:\n"
+    '  "requirement": one sentence starting with a verb '
+    '(e.g. "Validates JWT tokens and gates API requests.")\n'
+    '  "behavior_tags": list of applicable tags from the vocabulary ([] if none apply)\n\n'
+    "Example: "
+    '{"requirement": "Validates JWT tokens and gates incoming API requests.", '
+    '"behavior_tags": ["authentication", "validation", "rate-limiting"]}'
 )
 EXTRACT_TMPL = (
     "Module: {name}\n"
     "Code artifacts:\n{artifacts}\n\n"
-    "Write one sentence describing the functional requirement this module satisfies."
+    "Output the JSON object with requirement and behavior_tags."
 )
 
 
@@ -152,6 +169,44 @@ def _parse_requirement(text: str) -> str:
     return lines[-1][:200] if lines else ""
 
 
+def _parse_json_output(text: str) -> tuple[str, list[str]]:
+    """Parse JSON {requirement, behavior_tags} from LLM CoT output.
+
+    Returns (requirement_str, tags_list). Falls back to text parsing if JSON not found.
+    """
+    # Search for last {...} containing both fields
+    for pat in (
+        r'\{[^{}]*"requirement"[^{}]*"behavior_tags"[^{}]*\}',
+        r'\{[^{}]*"behavior_tags"[^{}]*"requirement"[^{}]*\}',
+    ):
+        matches = list(re.finditer(pat, text, re.DOTALL))
+        if matches:
+            try:
+                parsed = json.loads(matches[-1].group())
+                req = parsed.get("requirement", "").strip()
+                tags = [t for t in parsed.get("behavior_tags", []) if t in BEHAVIOR_TAG_VOCAB]
+                if req:
+                    return req, tags
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # Fallback: try last JSON block in text
+    brace_start = text.rfind("{")
+    brace_end = text.rfind("}")
+    if brace_start != -1 and brace_end > brace_start:
+        try:
+            parsed = json.loads(text[brace_start:brace_end + 1])
+            req = parsed.get("requirement", "").strip()
+            tags = [t for t in parsed.get("behavior_tags", []) if t in BEHAVIOR_TAG_VOCAB]
+            if req:
+                return req, tags
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Final fallback: plain text extraction (no tags)
+    return _parse_requirement(text), []
+
+
 def build_artifacts_text(name, node, body):
     parts = []
     summary = node.get("summary") or node.get("embed_text") or ""
@@ -160,10 +215,13 @@ def build_artifacts_text(name, node, body):
     return "\n".join(parts) if parts else name
 
 
-def extract_requirement(name, node, body, dry_run=False) -> str:
-    """Call LLM to extract a one-sentence requirement description."""
+def extract_requirement(name, node, body, dry_run=False) -> tuple[str, list[str]]:
+    """Call LLM to extract a one-sentence requirement and behavior_tags.
+
+    Returns (requirement_str, tags_list). Empty string on error (retried next run).
+    """
     if dry_run:
-        return f"[DRY RUN] Handles {name.split('.')[-1]} functionality."
+        return f"[DRY RUN] Handles {name.split('.')[-1]} functionality.", []
 
     artifacts_text = build_artifacts_text(name, node, body)
     prompt = EXTRACT_TMPL.format(name=name, artifacts=artifacts_text)
@@ -185,9 +243,9 @@ def extract_requirement(name, node, body, dry_run=False) -> str:
         )
         r.raise_for_status()
         raw = r.json()["choices"][0]["message"]["content"].strip()
-        return _parse_requirement(raw)
+        return _parse_json_output(raw)
     except Exception as e:
-        return ""  # skip on error, will be retried on next run
+        return "", []  # skip on error, will be retried on next run
 
 
 # ── Embedding ────────────────────────────────────────────────────────────────
@@ -262,8 +320,8 @@ def main():
     def _process(item):
         name, artifacts_text, act = item
         node_proxy = {"embed_text": artifacts_text}
-        req = extract_requirement(name, node_proxy, "", dry_run=args.dry_run)
-        return name, req, act
+        req, tags = extract_requirement(name, node_proxy, "", dry_run=args.dry_run)
+        return name, req, tags, act
 
     def _checkpoint():
         with _lock:
@@ -273,10 +331,14 @@ def main():
     with ThreadPoolExecutor(max_workers=n_workers) as pool:
         futures = {pool.submit(_process, item): item for item in todo}
         for fut in as_completed(futures):
-            name, req, act = fut.result()
+            name, req, tags, act = fut.result()
             with _lock:
                 if req:
-                    results[name] = {"requirement": req, "activity_score": act}
+                    results[name] = {
+                        "requirement": req,
+                        "activity_score": act,
+                        "behavior_tags": tags,
+                    }
                 _done[0] += 1
                 if _done[0] % BATCH_SIZE == 0:
                     open(out_json, "w").write(json.dumps(results, indent=2))

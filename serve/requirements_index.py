@@ -30,6 +30,22 @@ CLUSTER_THRESHOLD = float(os.environ.get("REQ_CLUSTER_THRESHOLD", "0.80"))
 REQUIREMENTS_JSON = ARTIFACT_DIR / "requirements.json"
 REQUIREMENTS_LANCE = ARTIFACT_DIR / "requirements.lance"
 
+# Cross-cutting keyword → behavior tags to match against
+_CROSS_CUTTING_MAP: dict[str, list[str]] = {
+    "retry":         ["retry", "error-handling", "circuit-breaking"],
+    "retrie":        ["retry"],
+    "backoff":       ["retry", "circuit-breaking"],
+    "circuit":       ["circuit-breaking", "retry"],
+    "idempoten":     ["idempotency"],
+    "dedup":         ["deduplication", "idempotency"],
+    "settlement":    ["settlement", "reconciliation"],
+    "reconcil":      ["reconciliation", "settlement"],
+    "locking":       ["locking"],
+    "distributed lock": ["locking"],
+    "rate.?limit":   ["rate-limiting"],
+    "throttl":       ["rate-limiting"],
+}
+
 
 # ── Types ─────────────────────────────────────────────────────────────────────
 @dataclass
@@ -39,15 +55,19 @@ class RequirementCluster:
     modules: list[str] = field(default_factory=list)
     key_functions: list[str] = field(default_factory=list)
     summary: str = ""
+    behavior_tags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "requirement": self.requirement,
             "confidence": round(self.confidence, 3),
             "modules": self.modules,
             "key_functions": self.key_functions,
             "summary": self.summary,
         }
+        if self.behavior_tags:
+            d["behavior_tags"] = self.behavior_tags
+        return d
 
 
 # ── Index state ───────────────────────────────────────────────────────────────
@@ -162,10 +182,59 @@ def _get_key_functions(module_name: str, n: int = 3) -> list[str]:
         return []
 
 
+# ── Tag-based routing ─────────────────────────────────────────────────────────
+def _extract_query_tags(query_lower: str) -> list[str]:
+    """Return behavior tags triggered by cross-cutting keywords in the query."""
+    triggered: set[str] = set()
+    for pattern, tags in _CROSS_CUTTING_MAP.items():
+        if re.search(pattern, query_lower):
+            triggered.update(tags)
+    return list(triggered)
+
+
+def _tag_search(tags: list[str], k: int) -> list[RequirementCluster]:
+    """Return modules whose behavior_tags overlap with the requested tags."""
+    if not tags:
+        return []
+    tag_set = set(tags)
+    scored = []
+    for module, meta in _req_meta.items():
+        module_tags = set(meta.get("behavior_tags", []))
+        overlap = tag_set & module_tags
+        if overlap:
+            score = len(overlap) / max(len(tag_set), 1)
+            scored.append({
+                "name": module,
+                "requirement": meta.get("requirement", ""),
+                "vector": [],
+                "score": score,
+                "behavior_tags": list(module_tags),
+            })
+    scored.sort(key=lambda x: -x["score"])
+    clusters = [[h] for h in scored[:k]]
+    results = []
+    for cluster in clusters:
+        rep = cluster[0]
+        modules = [h["name"] for h in cluster]
+        key_fns = _get_key_functions(modules[0]) if modules else []
+        results.append(RequirementCluster(
+            requirement=rep["requirement"],
+            confidence=rep["score"],
+            modules=modules,
+            key_functions=key_fns,
+            behavior_tags=rep.get("behavior_tags", []),
+        ))
+    return results
+
+
 # ── Main search ───────────────────────────────────────────────────────────────
 def search_requirements(query: str, k: int = 5) -> list[RequirementCluster]:
     """
     Search for functional requirement clusters matching a behavioral query.
+
+    For cross-cutting concern queries (retry, idempotency, settlement, etc.),
+    blends tag-based lookup with vector/keyword results to surface modules that
+    implement these concerns even when they're not the module's primary purpose.
 
     Uses vector similarity on requirements.lance. Falls back to keyword scan
     of requirements.json if lance index not available.
@@ -175,10 +244,28 @@ def search_requirements(query: str, k: int = 5) -> list[RequirementCluster]:
     if not is_ready():
         return []
 
+    # Cross-cutting routing: check for known behavioral keywords
+    query_tags = _extract_query_tags(query.lower())
+    tag_results = _tag_search(query_tags, k) if query_tags else []
+
     if _lance_tbl is not None:
-        return _vector_search(query, k)
+        vector_results = _vector_search(query, k)
     else:
-        return _keyword_search(query, k)
+        vector_results = _keyword_search(query, k)
+
+    if not tag_results:
+        return vector_results
+
+    # Merge: tag results first (they answer the cross-cutting query),
+    # then fill remaining slots with vector results not already in tag set
+    tag_modules = {r.modules[0] for r in tag_results if r.modules}
+    merged = list(tag_results)
+    for r in vector_results:
+        if r.modules and r.modules[0] not in tag_modules:
+            merged.append(r)
+        if len(merged) >= k:
+            break
+    return merged[:k]
 
 
 def _vector_search(query: str, k: int) -> list[RequirementCluster]:
@@ -240,12 +327,18 @@ def _build_clusters(raw_clusters: list[list[dict]], k: int) -> list[RequirementC
             if len(modules) > 1
             else ""
         )
+        # Propagate behavior_tags from metadata if available
+        tags = list(set(
+            t for h in cluster
+            for t in _req_meta.get(h["name"], {}).get("behavior_tags", [])
+        ))
         results.append(RequirementCluster(
             requirement=rep["requirement"],
             confidence=rep["score"],
             modules=modules,
             key_functions=key_fns,
             summary=summary,
+            behavior_tags=tags,
         ))
     return results
 
@@ -262,6 +355,8 @@ def format_for_mcp(clusters: list[RequirementCluster]) -> str:
         lines.append(f"   Modules: {', '.join(c.modules)}")
         if c.key_functions:
             lines.append(f"   Key functions: {', '.join(c.key_functions)}")
+        if c.behavior_tags:
+            lines.append(f"   Behaviors: {', '.join(c.behavior_tags)}")
         if c.summary:
             lines.append(f"   {c.summary}")
         lines.append("")
