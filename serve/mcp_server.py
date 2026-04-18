@@ -862,6 +862,7 @@ def get_context(
     """
     Full codebase context retrieval — expensive, use sparingly.
 
+    For behavioral/flow questions ("how does X work?"), try search_requirements first.
     Runs vector + keyword search, pulls cluster summaries, entry points, and
     doc chunks. Returns assembled context for cross-service architectural questions.
     No inference happens here — this is context gathering only.
