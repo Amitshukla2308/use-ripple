@@ -1166,18 +1166,19 @@ def predict_missing_changes(changed_modules: list, min_weight: int = 5,
         neighbors = cochange_index.get(cc_key, [])
         for nb in neighbors:
             nb_mod = _resolve_mg(nb["module"])
-            w = nb["weight"]
+            w  = nb["weight"]           # flat count — used for min_weight gate only
+            dw = nb.get("decay_weight", float(w))  # decay-accumulated — used for ranking
             if w < min_weight or nb_mod in changed_set:
                 continue
             if nb_mod not in candidate_evidence:
                 candidate_evidence[nb_mod] = {
                     "total_weight": 0, "max_single": 0, "sources": []
                 }
-            candidate_evidence[nb_mod]["total_weight"] += w
+            candidate_evidence[nb_mod]["total_weight"] += dw
             candidate_evidence[nb_mod]["max_single"] = max(
-                candidate_evidence[nb_mod]["max_single"], w)
+                candidate_evidence[nb_mod]["max_single"], dw)
             candidate_evidence[nb_mod]["sources"].append(
-                {"from": mod, "weight": w})
+                {"from": mod, "weight": w, "decay_weight": round(dw, 4)})
 
     # Score and rank predictions
     predictions = []
@@ -2054,7 +2055,8 @@ def _cochange_expand(seed_results: dict, top_seed: int = 5,
     results: dict = defaultdict(list)
     for nb in neighbors[:max_neighbors]:
         mod_name = nb["module"]
-        weight = nb["weight"]
+        weight   = nb["weight"]
+        dw_score = nb.get("decay_weight", float(weight))
         node_ids = file_to_nodes.get(mod_name, [])
         mod_count = 0
         for nid in node_ids:
@@ -2070,7 +2072,7 @@ def _cochange_expand(seed_results: dict, top_seed: int = 5,
                 "service": d.get("service", ""),
                 "type": d.get("type", ""),
                 "file": d.get("file", ""),
-                "_cochange_score": float(weight),
+                "_cochange_score": dw_score,
             }
             results[node["service"] or "unknown"].append(node)
             mod_count += 1
