@@ -4,8 +4,9 @@ Stage 6 — Build evolutionary coupling graph from git history.
 Streams one commit at a time (O(1) memory).
 Handles truncated/incomplete JSON files gracefully — writes partial results.
 """
-import argparse, json, pathlib, sys
+import argparse, json, math, pathlib, sys
 from collections import defaultdict
+from datetime import datetime, timezone
 from itertools import combinations
 
 try:
@@ -36,6 +37,11 @@ SKIP_DIRS  = {".stack-work", "test", "tests", "spec", "mock", "node_modules", "_
 TOP_K      = 30
 MAX_FILES  = 40  # skip mega-commits
 
+# Exponential decay: co-changes 6 months ago count half as much as today
+DECAY_HALF_LIFE_DAYS = 182.5
+DECAY_LAMBDA         = math.log(2) / DECAY_HALF_LIFE_DAYS
+_BUILD_NOW           = datetime.now(timezone.utc)
+
 
 def is_source(path: str) -> bool:
     p = pathlib.PurePosixPath(path)
@@ -52,11 +58,12 @@ def to_module(repo: str, fpath: str) -> str:
 
 
 def build():
-    cochange = defaultdict(lambda: defaultdict(int))
-    total_commits = 0
-    skipped       = 0
-    current_repo  = None
-    truncated     = False
+    cochange = defaultdict(lambda: defaultdict(float))
+    total_commits      = 0
+    skipped            = 0
+    current_repo       = None
+    current_date_str   = None
+    truncated          = False
 
     print(f"Streaming {GIT_HISTORY}...", flush=True)
 
@@ -75,8 +82,14 @@ def build():
 
                 # Detect commit start
                 if prefix == "repositories.item.commits.item" and event == "start_map":
-                    in_commit    = True
-                    commit_files = []
+                    in_commit       = True
+                    commit_files    = []
+                    current_date_str = None
+                    continue
+
+                # Capture commit date for decay weighting
+                if in_commit and prefix == "repositories.item.commits.item.date" and event == "string":
+                    current_date_str = value
                     continue
 
                 # Collect only files_changed paths (ignore diff/body/other fields)
@@ -92,9 +105,19 @@ def build():
 
                     if 2 <= len(commit_files) <= MAX_FILES and current_repo:
                         mods = [to_module(current_repo, fp) for fp in commit_files]
+                        # Decay weight: recent commits count more (half-life = 6 months)
+                        if current_date_str:
+                            try:
+                                commit_dt = datetime.fromisoformat(current_date_str)
+                                days_ago  = max(0, (_BUILD_NOW - commit_dt).days)
+                                w = math.exp(-DECAY_LAMBDA * days_ago)
+                            except (ValueError, OverflowError):
+                                w = 1.0
+                        else:
+                            w = 1.0
                         for a, b in combinations(mods, 2):
-                            cochange[a][b] += 1
-                            cochange[b][a] += 1
+                            cochange[a][b] += w
+                            cochange[b][a] += w
                     elif len(commit_files) > MAX_FILES:
                         skipped += 1
 
@@ -127,7 +150,7 @@ def build():
     edges, total_pairs = {}, 0
     for mod, partners in cochange.items():
         filtered = sorted(
-            [{"module": m, "weight": w} for m, w in partners.items() if w >= MIN_WEIGHT],
+            [{"module": m, "weight": round(w, 4)} for m, w in partners.items() if w >= MIN_WEIGHT],
             key=lambda x: -x["weight"]
         )[:TOP_K]
         if filtered:
@@ -139,11 +162,14 @@ def build():
 
     index = {
         "meta": {
-            "total_commits":  total_commits,
-            "truncated":      truncated,
-            "total_modules":  len(edges),
-            "total_pairs":    total_pairs,
-            "min_weight":     MIN_WEIGHT,
+            "total_commits":       total_commits,
+            "truncated":           truncated,
+            "total_modules":       len(edges),
+            "total_pairs":         total_pairs,
+            "min_weight":          MIN_WEIGHT,
+            "decay_weighted":      True,
+            "decay_half_life_days": DECAY_HALF_LIFE_DAYS,
+            "build_timestamp":     _BUILD_NOW.isoformat(),
         },
         "edges": edges,
     }
