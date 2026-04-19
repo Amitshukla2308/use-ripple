@@ -1471,13 +1471,37 @@ def score_change_risk(modules: list, rules: dict | None = None) -> dict:
         "detail": f"Changes span {n_unique} service{'s' if n_unique != 1 else ''}",
     }
 
+    # ── 5. Bus Factor Warning ──
+    # Flag modules where a single author dominates (>90%) AND blast > 5
+    bus_factor_modules = []
+    if ownership_index:
+        for mod in changed:
+            own_key = _ownership_name_map.get(mod, "")
+            cc_key = _resolve_cc(mod)
+            authors = (ownership_index.get(mod) or ownership_index.get(own_key)
+                       or ownership_index.get(cc_key) or [])
+            if not authors:
+                continue
+            total_w = sum(a.get("score", a.get("commits", 0)) for a in authors)
+            if total_w <= 0 or len(authors) < 2:
+                continue
+            top_w = authors[0].get("score", authors[0].get("commits", 0))
+            if top_w / total_w > 0.90 and n_cochange > 5:
+                bus_factor_modules.append({
+                    "module": mod,
+                    "dominant_author": authors[0].get("name", ""),
+                    "dominance_pct": round(top_w / total_w * 100),
+                })
+
+    bus_factor_penalty = 10 if bus_factor_modules else 0
+
     # ── Composite Score ──
     composite = round(
         blast_score * weights["blast_radius"]
         + gap_score * weights["coverage_gap"]
         + reviewer_score * weights["reviewer_risk"]
         + spread_score * weights["service_spread"]
-    )
+    ) + bus_factor_penalty
 
     if composite <= 30:
         level = "LOW"
@@ -1499,6 +1523,9 @@ def score_change_risk(modules: list, rules: dict | None = None) -> dict:
     if n_unique > 3:
         parts.append(f"spans {n_unique} services")
 
+    if bus_factor_modules:
+        parts.append(f"{len(bus_factor_modules)} solo-owned module(s) in high-blast path")
+
     if not parts:
         if level == "LOW":
             recommendation = "Low risk change. Proceed normally."
@@ -1510,8 +1537,8 @@ def score_change_risk(modules: list, rules: dict | None = None) -> dict:
             top_names = [r["name"] for r in reviewers_list[:3]]
             recommendation += f" Suggested reviewers: {', '.join(top_names)}."
 
-    return {
-        "risk_score": composite,
+    result = {
+        "risk_score": min(composite, 100),
         "risk_level": level,
         "components": {
             "blast_radius": blast_component,
@@ -1521,6 +1548,14 @@ def score_change_risk(modules: list, rules: dict | None = None) -> dict:
         },
         "recommendation": recommendation,
     }
+    if bus_factor_modules:
+        result["bus_factor_warning"] = {
+            "affected_modules": bus_factor_modules,
+            "penalty_applied": bus_factor_penalty,
+            "detail": (f"{len(bus_factor_modules)} module(s) are solo-owned (>90% by one author) "
+                       f"and are in a high blast-radius path. Knowledge concentration risk."),
+        }
+    return result
 
 
 # ════════════════════════════════════════════════════════════════════════════
