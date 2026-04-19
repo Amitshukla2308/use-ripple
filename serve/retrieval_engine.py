@@ -1870,13 +1870,18 @@ def fast_search_reranked(query: str, top_k: int = 10) -> dict:
     # → reranker risks demoting exact-name matches in favour of body-matched results.
     # Threshold 0.30 derived from empirical calibration on 7-query benchmark (2026-04-17):
     # spread < 0.30 correlated with neutral/harmful reranking; ≥ 0.30 with genuine gains.
+    #
+    # T-014b dual gate: high-frequency single-term queries (e.g. "refund" → 3,600+ results)
+    # produce artificially compressed spread due to IDF saturation — low spread here means
+    # ambiguity-from-prevalence, NOT BM25 confidence. Override to RERANK when n_results > 500.
     _bm25_scores = sorted([n.get("_bm25_score", 0) for n in flat], reverse=True)
     _max_s = _bm25_scores[0] if _bm25_scores else 0
     _med_s = _bm25_scores[len(_bm25_scores) // 2] if _bm25_scores else 0
     _spread = (_max_s - _med_s) / _max_s if _max_s > 0 else 0
     _RERANK_THRESHOLD = 0.30
-    if _spread < _RERANK_THRESHOLD:
-        # BM25 is confident — reranking adds risk without reward; return top-k by BM25 score
+    _HIGH_FREQ_OVERRIDE = 500  # n_results threshold — above this, spread is unreliable
+    if _spread < _RERANK_THRESHOLD and len(flat) <= _HIGH_FREQ_OVERRIDE:
+        # BM25 is confident and query is specific — reranking adds risk without reward
         flat_sorted = sorted(flat, key=lambda x: -x.get("_bm25_score", 0))[:top_k]
         result: dict = defaultdict(list)
         for node in flat_sorted:
