@@ -1022,6 +1022,12 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
                         if key in gi:
                             g = gi[key]
                             gs = 1.0 - min(g["p_value"] * 20, 1.0)
+                            # T-046: symmetric cross-service pairs (A→B AND B→A) predict
+                            # co-change ~67% better than asymmetric (W=10: 0.0684 vs 0.0425)
+                            if gi is granger_cross_index:
+                                rev = f"{cc_t}→{cc_s}" if key == f"{cc_s}→{cc_t}" else f"{cc_s}→{cc_t}"
+                                if rev in granger_cross_index:
+                                    gs = min(gs * 1.5, 1.0)
                             if gs > granger_score:
                                 granger_score = gs
                                 granger_info = {"lag": g["best_lag"], "p_value": g["p_value"]}
@@ -1060,6 +1066,12 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
                         if key in gi:
                             g = gi[key]
                             gs = 1.0 - min(g["p_value"] * 20, 1.0)
+                            # T-046: symmetric cross-service pairs (A→B AND B→A) predict
+                            # co-change ~67% better than asymmetric (W=10: 0.0684 vs 0.0425)
+                            if gi is granger_cross_index:
+                                rev = f"{cc_t}→{cc_s}" if key == f"{cc_s}→{cc_t}" else f"{cc_s}→{cc_t}"
+                                if rev in granger_cross_index:
+                                    gs = min(gs * 1.5, 1.0)
                             if gs > granger_score:
                                 granger_score = gs
                                 granger_info = {"lag": g["best_lag"], "p_value": g["p_value"]}
