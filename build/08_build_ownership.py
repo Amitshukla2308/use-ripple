@@ -83,16 +83,21 @@ def to_module(repo: str, fpath: str) -> str:
 
 
 def compute_decay_ownership(events: list, half_life_days: float = DECAY_HALF_LIFE_DAYS):
-    """Apply exponential decay weights to (timestamp, module, email) events."""
+    """Apply exponential decay weights to (timestamp, module, email) events.
+    Returns (ownership, author_last_ts) where author_last_ts[email] = max timestamp seen.
+    """
     if not events:
         return defaultdict(lambda: defaultdict(float)), {}
     lam = math.log(2) / half_life_days
     now_ts = max(ts for ts, _, _ in events)
     ownership: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    author_last_ts: dict[str, float] = {}
     for ts, mod, email in events:
         days_ago = max(0.0, (now_ts - ts) / 86400.0)
         ownership[mod][email] += math.exp(-lam * days_ago)
-    return ownership
+        if ts > author_last_ts.get(email, 0.0):
+            author_last_ts[email] = ts
+    return ownership, author_last_ts
 
 
 def build_from_repos(source_dir: pathlib.Path):
@@ -188,8 +193,8 @@ def build_from_repos(source_dir: pathlib.Path):
         except Exception as e:
             print(f"    ERROR on {repo_name}: {e}", flush=True)
 
-    ownership = compute_decay_ownership(events)
-    return ownership, author_names, total_commits
+    ownership, author_last_ts = compute_decay_ownership(events)
+    return ownership, author_names, total_commits, author_last_ts
 
 
 def build_from_json(json_path: pathlib.Path):
@@ -262,8 +267,8 @@ def build_from_json(json_path: pathlib.Path):
         except Exception as exc:
             print(f"\nWARNING: JSON truncated at {total_commits:,} commits: {exc}", flush=True)
 
-    ownership = compute_decay_ownership(events)
-    return ownership, author_names, total_commits
+    ownership, author_last_ts = compute_decay_ownership(events)
+    return ownership, author_names, total_commits, author_last_ts
 
 
 def apply_aliases(ownership, author_names, aliases, display_names_map, exclude):
@@ -297,7 +302,7 @@ def apply_aliases(ownership, author_names, aliases, display_names_map, exclude):
     return merged_ownership, merged_names
 
 
-def write_index(ownership, author_names, total_commits, out_path):
+def write_index(ownership, author_names, total_commits, out_path, author_last_ts=None):
     """Write the ownership index to disk."""
     aliases, display_names_map, exclude = load_aliases()
     ownership, author_names = apply_aliases(
@@ -314,6 +319,16 @@ def write_index(ownership, author_names, total_commits, out_path):
             for email, score in sorted_authors
         ]
 
+    # Convert float timestamps to ISO strings for readability
+    author_last_active = {}
+    if author_last_ts:
+        for email, ts in author_last_ts.items():
+            try:
+                from datetime import timezone as _tz
+                author_last_active[email] = datetime.fromtimestamp(ts, tz=_tz.utc).strftime("%Y-%m-%d")
+            except Exception:
+                pass
+
     output = {
         "meta": {
             "total_commits": total_commits,
@@ -323,6 +338,7 @@ def write_index(ownership, author_names, total_commits, out_path):
             "decay_half_life_days": DECAY_HALF_LIFE_DAYS,
         },
         "authors": dict(author_names),
+        "author_last_active": author_last_active,
         "modules": index,
     }
 
@@ -358,21 +374,21 @@ def main():
     out_path = artifact_dir / "ownership_index.json"
 
     if args.from_repos:
-        ownership, author_names, total = build_from_repos(pathlib.Path(args.from_repos))
+        ownership, author_names, total, author_last_ts = build_from_repos(pathlib.Path(args.from_repos))
     elif args.from_json:
-        ownership, author_names, total = build_from_json(pathlib.Path(args.from_json))
+        ownership, author_names, total, author_last_ts = build_from_json(pathlib.Path(args.from_json))
     else:
         source_dir = pathlib.Path(cfg.get("source_dir",
             "/home/beast/projects/workspaces/juspay/source"))
         if source_dir.exists():
             print(f"Auto-detected source repos at {source_dir}", flush=True)
-            ownership, author_names, total = build_from_repos(source_dir)
+            ownership, author_names, total, author_last_ts = build_from_repos(source_dir)
         else:
             json_path = pathlib.Path(cfg.get("git_history_path",
                 "/home/beast/projects/workspaces/juspay/git_history.json"))
-            ownership, author_names, total = build_from_json(json_path)
+            ownership, author_names, total, author_last_ts = build_from_json(json_path)
 
-    write_index(ownership, author_names, total, out_path)
+    write_index(ownership, author_names, total, out_path, author_last_ts)
 
 
 if __name__ == "__main__":
