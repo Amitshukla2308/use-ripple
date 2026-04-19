@@ -484,8 +484,24 @@ def initialize(
             print("Loading cross-service Granger index...")
             with open(str(granger_cross_path)) as _f:
                 gci = json.load(_f)
-            granger_cross_index.update(gci.get("causal_pairs", {}))
             meta_gci = gci.get("metadata", {})
+            _causal_pairs = gci.get("causal_pairs", {})
+            # Staleness filter: drop pairs where either module was inactive for too long.
+            # T-052 benchmark: filtering 365d-stale modules improves cross-service recall +6.48pp.
+            _mod_last_day  = gci.get("module_last_active_day", {})
+            _day_end       = meta_gci.get("day_end")
+            _stale_days    = int(os.environ.get("GRANGER_STALENESS_DAYS", "365"))
+            if _mod_last_day and _day_end:
+                _cutoff = _day_end - _stale_days
+                _orig   = len(_causal_pairs)
+                _causal_pairs = {
+                    k: v for k, v in _causal_pairs.items()
+                    if (_mod_last_day.get(v["source"], 0) >= _cutoff and
+                        _mod_last_day.get(v["target"], 0) >= _cutoff)
+                }
+                print(f"  Staleness filter ({_stale_days}d): {_orig:,} → {len(_causal_pairs):,} pairs "
+                      f"({_orig - len(_causal_pairs):,} stale dropped)")
+            granger_cross_index.update(_causal_pairs)
             print(f"  {meta_gci.get('significant_results', 0):,} cross-service causal pairs "
                   f"({meta_gci.get('pairs_tested', 0):,} tested)")
 

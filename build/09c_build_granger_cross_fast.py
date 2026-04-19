@@ -133,6 +133,9 @@ def build():
     n_days    = day_end - day_start + 1
     print(f"  Calendar span: {n_days} days  |  Modules tracked: {len(module_days):,}", flush=True)
 
+    # Record last active day per module (for staleness filtering at serve time)
+    module_last_active_day = {m: max(days) for m, days in module_days.items()}
+
     # ── Step 3: Run Granger tests ─────────────────────────────────────────
     print(f"Running Granger tests ({len(top_pairs):,} pairs, {n_days}-point series)...", flush=True)
     granger_results = {}; tested = significant = skipped = 0
@@ -196,7 +199,9 @@ def build():
             "significant_results": significant,
             "p_threshold": P_THRESHOLD, "max_lag": MAX_LAG,
             "min_active_days": MIN_ACTIVE_DAYS, "mode": "cross-service-day-bucket",
+            "day_end": day_end,
         },
+        "module_last_active_day": module_last_active_day,
         "causal_pairs": granger_results,
     }
     with open(OUT_PATH, "w") as f:
