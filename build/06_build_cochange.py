@@ -38,7 +38,7 @@ TOP_K      = 30
 MAX_FILES  = 40  # skip mega-commits
 
 # Exponential decay: co-changes 6 months ago count half as much as today
-DECAY_HALF_LIFE_DAYS = 182.5
+DECAY_HALF_LIFE_DAYS = 365.0
 DECAY_LAMBDA         = math.log(2) / DECAY_HALF_LIFE_DAYS
 _BUILD_NOW           = datetime.now(timezone.utc)
 
