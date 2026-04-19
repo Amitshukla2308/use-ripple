@@ -1302,7 +1302,8 @@ def suggest_reviewers(changed_modules: list, top_k: int = 5) -> dict:
             email = author["email"]
             # Weight: direct changes scored higher than blast radius neighbors
             weight = 2.0 if mod in changed_set else 1.0
-            score = author["commits"] * weight
+            raw_score = author.get("score", author.get("commits", 0))
+            score = raw_score * weight
 
             if email not in author_scores:
                 author_scores[email] = {
@@ -1313,7 +1314,7 @@ def suggest_reviewers(changed_modules: list, top_k: int = 5) -> dict:
                     "modules": [],
                 }
             author_scores[email]["score"] += score
-            author_scores[email]["commits"] += author["commits"]
+            author_scores[email]["commits"] += raw_score
             if mod not in author_scores[email]["modules"]:
                 author_scores[email]["modules"].append(mod)
 
@@ -1694,7 +1695,7 @@ def get_why_context(symbol_name: str) -> dict:
     if owners:
         result["found"] = True
         result["owners"] = [
-            {"name": o.get("name", ""), "email": o.get("email", ""), "commits": o.get("commits", 0)}
+            {"name": o.get("name", ""), "email": o.get("email", ""), "commits": o.get("score", o.get("commits", 0))}
             for o in owners[:3]
         ]
 

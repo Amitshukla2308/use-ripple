@@ -5,14 +5,18 @@ For each module, tracks which authors have changed it and how often.
 Used by Guardian Mode "Suggested Reviewers" to recommend PR reviewers
 based on who has the most context on affected modules.
 
+Decay weighting (T-054): recent commits count more. Half-life = 90 days
+gives +3.05pp recall@1 over flat counting.
+
 Two modes:
   1. --from-repos <dir>  : scan git repos directly (preferred, complete data)
   2. --from-json <file>  : stream git_history.json with ijson (handles truncation)
 
 Output: ownership_index.json in artifact dir.
 """
-import argparse, json, os, pathlib, subprocess, sys
+import argparse, json, math, os, pathlib, subprocess, sys
 from collections import defaultdict
+from datetime import datetime, timezone
 
 try:
     import yaml
@@ -29,6 +33,9 @@ ALIAS_PATH = pathlib.Path(
     cfg.get("author_aliases_path",
             str(pathlib.Path(__file__).parent.parent / "config" / "author_aliases.yaml"))
 )
+
+# T-054: 90d half-life is optimal (recall@1 0.1511 vs 0.1206 flat, +3.05pp)
+DECAY_HALF_LIFE_DAYS = 90.0
 
 
 def load_aliases() -> tuple[dict, dict, set]:
@@ -75,9 +82,22 @@ def to_module(repo: str, fpath: str) -> str:
     return f"{repo}::{p.replace('/', '::')}"
 
 
+def compute_decay_ownership(events: list, half_life_days: float = DECAY_HALF_LIFE_DAYS):
+    """Apply exponential decay weights to (timestamp, module, email) events."""
+    if not events:
+        return defaultdict(lambda: defaultdict(float)), {}
+    lam = math.log(2) / half_life_days
+    now_ts = max(ts for ts, _, _ in events)
+    ownership: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for ts, mod, email in events:
+        days_ago = max(0.0, (now_ts - ts) / 86400.0)
+        ownership[mod][email] += math.exp(-lam * days_ago)
+    return ownership
+
+
 def build_from_repos(source_dir: pathlib.Path):
     """Build ownership by running git log on each repo."""
-    ownership = defaultdict(lambda: defaultdict(int))
+    events = []  # (timestamp_float, module, email)
     author_names = {}
     total_commits = 0
 
@@ -90,8 +110,9 @@ def build_from_repos(source_dir: pathlib.Path):
         repo_commits = 0
 
         try:
+            # %aI = author date, strict ISO 8601
             result = subprocess.run(
-                ["git", "log", "--all", "--format=COMMIT_SEP%n%ae%n%an", "--name-only"],
+                ["git", "log", "--all", "--format=COMMIT_SEP%n%ae%n%an%n%aI", "--name-only"],
                 cwd=str(repo_path),
                 capture_output=True, text=True, timeout=120,
             )
@@ -101,17 +122,21 @@ def build_from_repos(source_dir: pathlib.Path):
 
             current_email = ""
             current_name = ""
+            current_date_str = ""
             current_files = []
+            header_lines = 0  # 0=email, 1=name, 2=date parsed
             in_commit = False
 
             for line in result.stdout.split("\n"):
                 if line.startswith("COMMIT_SEP"):
-                    # Process previous commit
-                    if current_email and 1 <= len(current_files) <= MAX_FILES:
+                    if current_email and current_date_str and 1 <= len(current_files) <= MAX_FILES:
+                        try:
+                            ts = datetime.fromisoformat(current_date_str).timestamp()
+                        except Exception:
+                            ts = 0.0
                         for fp in current_files:
                             if is_source(fp):
-                                mod = to_module(repo_name, fp)
-                                ownership[mod][current_email] += 1
+                                events.append((ts, to_module(repo_name, fp), current_email))
                         repo_commits += 1
                     elif current_email:
                         repo_commits += 1
@@ -119,16 +144,24 @@ def build_from_repos(source_dir: pathlib.Path):
                     current_files = []
                     current_email = ""
                     current_name = ""
+                    current_date_str = ""
+                    header_lines = 0
                     in_commit = True
                     continue
 
-                if in_commit and not current_email:
+                if in_commit and header_lines == 0:
                     current_email = line.strip().lower()
+                    header_lines = 1
                     continue
-                if in_commit and not current_name:
+                if in_commit and header_lines == 1:
                     current_name = line.strip()
                     if current_email:
                         author_names[current_email] = current_name
+                    header_lines = 2
+                    continue
+                if in_commit and header_lines == 2:
+                    current_date_str = line.strip()
+                    header_lines = 3
                     continue
 
                 stripped = line.strip()
@@ -136,15 +169,18 @@ def build_from_repos(source_dir: pathlib.Path):
                     current_files.append(stripped)
 
             # Process last commit
-            if current_email and 1 <= len(current_files) <= MAX_FILES:
+            if current_email and current_date_str and 1 <= len(current_files) <= MAX_FILES:
+                try:
+                    ts = datetime.fromisoformat(current_date_str).timestamp()
+                except Exception:
+                    ts = 0.0
                 for fp in current_files:
                     if is_source(fp):
-                        mod = to_module(repo_name, fp)
-                        ownership[mod][current_email] += 1
+                        events.append((ts, to_module(repo_name, fp), current_email))
                 repo_commits += 1
 
             total_commits += repo_commits
-            repo_mods = sum(1 for m in ownership if m.startswith(f"{repo_name}::"))
+            repo_mods = len({e[1] for e in events if e[1].startswith(f"{repo_name}::")})
             print(f"    {repo_commits:,} commits  {repo_mods:,} modules", flush=True)
 
         except subprocess.TimeoutExpired:
@@ -152,6 +188,7 @@ def build_from_repos(source_dir: pathlib.Path):
         except Exception as e:
             print(f"    ERROR on {repo_name}: {e}", flush=True)
 
+    ownership = compute_decay_ownership(events)
     return ownership, author_names, total_commits
 
 
@@ -162,7 +199,7 @@ def build_from_json(json_path: pathlib.Path):
     except ImportError:
         raise SystemExit("pip install ijson (needed for --from-json mode)")
 
-    ownership = defaultdict(lambda: defaultdict(int))
+    events = []  # (timestamp_float, module, email)
     author_names = {}
     total_commits = 0
     current_repo = None
@@ -175,6 +212,7 @@ def build_from_json(json_path: pathlib.Path):
         commit_files = []
         commit_author_email = ""
         commit_author_name = ""
+        commit_ts = 0.0
 
         try:
             for prefix, event, value in parser:
@@ -186,6 +224,7 @@ def build_from_json(json_path: pathlib.Path):
                     commit_files = []
                     commit_author_email = ""
                     commit_author_name = ""
+                    commit_ts = 0.0
                     continue
                 if in_commit:
                     if prefix == "repositories.item.commits.item.author_email" and event == "string":
@@ -193,6 +232,15 @@ def build_from_json(json_path: pathlib.Path):
                         continue
                     if prefix == "repositories.item.commits.item.author_name" and event == "string":
                         commit_author_name = value
+                        continue
+                    if (prefix in ("repositories.item.commits.item.date",
+                                   "repositories.item.commits.item.timestamp")
+                            and event == "string"):
+                        try:
+                            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                            commit_ts = dt.timestamp()
+                        except Exception:
+                            pass
                         continue
                 if in_commit and event == "string" and "files_changed" in prefix and prefix.endswith(".path"):
                     if is_source(value):
@@ -206,15 +254,15 @@ def build_from_json(json_path: pathlib.Path):
                     if (commit_author_email and current_repo
                             and 1 <= len(commit_files) <= MAX_FILES):
                         for fp in commit_files:
-                            mod = to_module(current_repo, fp)
-                            ownership[mod][commit_author_email] += 1
+                            events.append((commit_ts, to_module(current_repo, fp), commit_author_email))
                     if total_commits % 5000 == 0:
-                        print(f"  {total_commits:,} commits  {len(ownership):,} modules  "
+                        print(f"  {total_commits:,} commits  {len(events):,} events  "
                               f"repo={current_repo}", flush=True)
                     continue
         except Exception as exc:
             print(f"\nWARNING: JSON truncated at {total_commits:,} commits: {exc}", flush=True)
 
+    ownership = compute_decay_ownership(events)
     return ownership, author_names, total_commits
 
 
@@ -223,26 +271,23 @@ def apply_aliases(ownership, author_names, aliases, display_names_map, exclude):
     if not aliases and not exclude:
         return ownership, author_names
 
-    # Merge author_names through aliases
     merged_names = {}
     for email, name in author_names.items():
         if email in exclude:
             continue
         canonical = resolve_email(email, aliases)
-        # Prefer display_names_map, then existing name for canonical, then current name
         if canonical in display_names_map:
             merged_names[canonical] = display_names_map[canonical]
         elif canonical not in merged_names:
             merged_names[canonical] = name
 
-    # Merge ownership counts through aliases
-    merged_ownership = defaultdict(lambda: defaultdict(int))
+    merged_ownership: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for mod, authors in ownership.items():
-        for email, count in authors.items():
+        for email, score in authors.items():
             if email in exclude:
                 continue
             canonical = resolve_email(email, aliases)
-            merged_ownership[mod][canonical] += count
+            merged_ownership[mod][canonical] += score
 
     aliased = sum(1 for e in author_names if resolve_email(e, aliases) != e)
     excluded = sum(1 for e in author_names if e in exclude)
@@ -254,7 +299,6 @@ def apply_aliases(ownership, author_names, aliases, display_names_map, exclude):
 
 def write_index(ownership, author_names, total_commits, out_path):
     """Write the ownership index to disk."""
-    # Apply alias resolution
     aliases, display_names_map, exclude = load_aliases()
     ownership, author_names = apply_aliases(
         ownership, author_names, aliases, display_names_map, exclude
@@ -266,8 +310,8 @@ def write_index(ownership, author_names, total_commits, out_path):
         sorted_authors = sorted(authors.items(), key=lambda x: -x[1])[:TOP_AUTHORS]
         index[mod] = [
             {"email": email, "name": author_names.get(email, email.split("@")[0]),
-             "commits": count}
-            for email, count in sorted_authors
+             "score": round(score, 4)}
+            for email, score in sorted_authors
         ]
 
     output = {
@@ -276,6 +320,7 @@ def write_index(ownership, author_names, total_commits, out_path):
             "total_modules": len(index),
             "total_unique_authors": len(author_names),
             "aliases_applied": len(aliases) if aliases else 0,
+            "decay_half_life_days": DECAY_HALF_LIFE_DAYS,
         },
         "authors": dict(author_names),
         "modules": index,
@@ -295,7 +340,7 @@ def write_index(ownership, author_names, total_commits, out_path):
     for mod, authors in list(index.items())[:5]:
         print(f"  {mod}")
         for a in authors[:2]:
-            print(f"    {a['name']} ({a['email']}): {a['commits']} commits")
+            print(f"    {a['name']} ({a['email']}): score={a['score']:.3f}")
 
 
 def main():
@@ -317,7 +362,6 @@ def main():
     elif args.from_json:
         ownership, author_names, total = build_from_json(pathlib.Path(args.from_json))
     else:
-        # Auto-detect: prefer repos if available
         source_dir = pathlib.Path(cfg.get("source_dir",
             "/home/beast/projects/workspaces/juspay/source"))
         if source_dir.exists():
