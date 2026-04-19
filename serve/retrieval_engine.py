@@ -64,7 +64,8 @@ guardrails_index:    dict  = {}   # module_name → {"file", "score", ...}
 guardrails_content:  dict  = {}   # module_name → guardrail markdown text
 file_to_nodes:       dict  = {}   # module_name → [node_id, ...]
 filepath_to_module:  dict  = {}   # relative_file_path → module_name
-_cochange_loaded_at: float = 0.0
+_cochange_loaded_at:    float = 0.0
+_cochange_decay_weighted: bool  = False  # True when index uses exponential decay weights
 _mg_to_cc:           dict  = {}   # MG dot-name → cochange ::key
 _ownership_name_map: dict  = {}   # MG dot-name → ownership ::key
 _cc_to_mg:           dict  = {}   # cochange ::key → MG dot-name
@@ -416,6 +417,8 @@ def initialize(
             cochange_index.update(ci.get("edges", {}))
             _cochange_loaded_at = cochange_path.stat().st_mtime
             meta = ci.get("meta", {})
+            global _cochange_decay_weighted
+            _cochange_decay_weighted = bool(meta.get("decay_weighted", False))
             print(f"  {meta.get('total_modules',0):,} modules  {meta.get('total_pairs',0):,} pairs")
 
             # Load cross-repo co-change index (additive — merges into same dict)
@@ -1212,8 +1215,10 @@ def predict_missing_changes(changed_modules: list, min_weight: int = 5,
     for mod, ev in candidate_evidence.items():
         # Confidence: how many changed modules point to this candidate
         source_count = len(ev["sources"])
-        # Normalize confidence: multiple sources + high weight = high confidence
-        confidence = min(1.0, (ev["total_weight"] / 50) * (source_count / len(changed_set)))
+        # Normalize confidence: multiple sources + high weight = high confidence.
+        # Decay-weighted index has p95≈11 (vs flat p95≈33), so use lower divisor.
+        _cc_norm = 15.0 if _cochange_decay_weighted else 50.0
+        confidence = min(1.0, (ev["total_weight"] / _cc_norm) * (source_count / len(changed_set)))
 
         # Granger causality boost: if any changed module causally predicts this candidate
         # Checks intra-service index first, then cross-service index
