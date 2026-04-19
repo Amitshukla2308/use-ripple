@@ -89,9 +89,73 @@ def test_bonus_capped_at_one():
     assert score <= 1.0, f"Score {score} exceeds 1.0 — cap broken!"
     print(f"[PASS] Symmetry bonus capped at 1.0: {score:.3f}")
 
+def get_granger_info(src: str, tgt: str) -> dict | None:
+    """Extract full granger_info dict using same logic as retrieval_engine."""
+    granger_score = 0.0
+    granger_info = None
+    for key in (f"{src}→{tgt}", f"{tgt}→{src}"):
+        for gi in (re.granger_index, re.granger_cross_index):
+            if key in gi:
+                g = gi[key]
+                gs = 1.0 - min(g["p_value"] * 20, 1.0)
+                if gi is re.granger_cross_index:
+                    rev = f"{tgt}→{src}" if key == f"{src}→{tgt}" else f"{src}→{tgt}"
+                    if rev in re.granger_cross_index:
+                        gs = min(gs * 1.5, 1.0)
+                if gs > granger_score:
+                    granger_score = gs
+                    _lag = g["best_lag"]
+                    _is_sym = (gi is re.granger_cross_index and (
+                        f"{tgt}→{src}" if key == f"{src}→{tgt}" else f"{src}→{tgt}"
+                    ) in re.granger_cross_index)
+                    granger_info = {
+                        "lag": _lag, "p_value": g["p_value"],
+                        "urgency": "IMMEDIATE" if _lag <= 2 else "DELAYED",
+                        "symmetric": _is_sym,
+                    }
+                break
+    return granger_info
+
+def test_urgency_immediate():
+    re.granger_cross_index.clear()
+    re.granger_index.clear()
+    re.granger_cross_index["A→B"] = {"p_value": 0.01, "best_lag": 1, "weight": 100.0}
+
+    info = get_granger_info("A", "B")
+    assert info is not None
+    assert info["urgency"] == "IMMEDIATE", f"Expected IMMEDIATE, got {info['urgency']}"
+    assert info["lag"] == 1
+    assert info["symmetric"] is False
+    print(f"[PASS] lag=1 → urgency=IMMEDIATE, symmetric=False")
+
+def test_urgency_delayed():
+    re.granger_cross_index.clear()
+    re.granger_index.clear()
+    re.granger_cross_index["C→D"] = {"p_value": 0.02, "best_lag": 4, "weight": 50.0}
+
+    info = get_granger_info("C", "D")
+    assert info is not None
+    assert info["urgency"] == "DELAYED", f"Expected DELAYED, got {info['urgency']}"
+    assert info["lag"] == 4
+    print(f"[PASS] lag=4 → urgency=DELAYED")
+
+def test_symmetric_immediate():
+    re.granger_cross_index.clear()
+    re.granger_index.clear()
+    re.granger_cross_index["P→Q"] = {"p_value": 0.01, "best_lag": 2, "weight": 100.0}
+    re.granger_cross_index["Q→P"] = {"p_value": 0.01, "best_lag": 2, "weight": 100.0}
+
+    info = get_granger_info("P", "Q")
+    assert info["urgency"] == "IMMEDIATE"
+    assert info["symmetric"] is True
+    print(f"[PASS] symmetric+lag=2 → urgency=IMMEDIATE, symmetric=True")
+
 if __name__ == "__main__":
     test_asymmetric_no_bonus()
     test_symmetric_gets_bonus()
     test_intra_service_no_bonus()
     test_bonus_capped_at_one()
-    print("\n4/4 PASS")
+    test_urgency_immediate()
+    test_urgency_delayed()
+    test_symmetric_immediate()
+    print("\n7/7 PASS")

@@ -1030,7 +1030,15 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
                                     gs = min(gs * 1.5, 1.0)
                             if gs > granger_score:
                                 granger_score = gs
-                                granger_info = {"lag": g["best_lag"], "p_value": g["p_value"]}
+                                _lag = g["best_lag"]
+                                _is_sym = (gi is granger_cross_index and (
+                                    f"{cc_t}→{cc_s}" if key == f"{cc_s}→{cc_t}" else f"{cc_s}→{cc_t}"
+                                ) in granger_cross_index)
+                                granger_info = {
+                                    "lag": _lag, "p_value": g["p_value"],
+                                    "urgency": "IMMEDIATE" if _lag <= 2 else "DELAYED",
+                                    "symmetric": _is_sym,
+                                }
                             break
 
         # Activity boost: recently changed modules are more likely to be affected
@@ -1074,7 +1082,15 @@ def get_blast_radius(module_names: list, max_hops: int = 2) -> dict:
                                     gs = min(gs * 1.5, 1.0)
                             if gs > granger_score:
                                 granger_score = gs
-                                granger_info = {"lag": g["best_lag"], "p_value": g["p_value"]}
+                                _lag = g["best_lag"]
+                                _is_sym = (gi is granger_cross_index and (
+                                    f"{cc_t}→{cc_s}" if key == f"{cc_s}→{cc_t}" else f"{cc_s}→{cc_t}"
+                                ) in granger_cross_index)
+                                granger_info = {
+                                    "lag": _lag, "p_value": g["p_value"],
+                                    "urgency": "IMMEDIATE" if _lag <= 2 else "DELAYED",
+                                    "symmetric": _is_sym,
+                                }
                             break
 
         if mod in tiered:
