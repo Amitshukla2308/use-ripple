@@ -1220,6 +1220,8 @@ def predict_missing_changes(changed_modules: list, min_weight: int = 5,
         causal_info = None
         if granger_index or granger_cross_index:
             best_causal = None
+            best_gi = None
+            best_cc_src = best_cc_tgt = None
             for src in ev["sources"]:
                 cc_src = _resolve_cc(src["from"])
                 cc_tgt = _resolve_cc(mod)
@@ -1229,13 +1231,20 @@ def predict_missing_changes(changed_modules: list, min_weight: int = 5,
                         g = gi[key]
                         if best_causal is None or g["p_value"] < best_causal["p_value"]:
                             best_causal = g
-                            break
+                            best_gi = gi
+                            best_cc_src, best_cc_tgt = cc_src, cc_tgt
+                        break
             if best_causal:
+                _lag = best_causal["best_lag"]
+                _is_sym = (best_gi is granger_cross_index and
+                           f"{best_cc_tgt}→{best_cc_src}" in granger_cross_index)
                 causal_info = {
                     "direction": f"{best_causal['source'].split('::')[-1]}→{best_causal['target'].split('::')[-1]}",
-                    "lag": best_causal["best_lag"],
+                    "lag": _lag,
                     "p_value": best_causal["p_value"],
                     "strength": "strong" if best_causal["p_value"] < 0.01 else "moderate",
+                    "urgency": "IMMEDIATE" if _lag <= 2 else "DELAYED",
+                    "symmetric": _is_sym,
                 }
                 # Boost confidence for causal relationships
                 if best_causal["p_value"] < 0.01:

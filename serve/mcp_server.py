@@ -501,10 +501,34 @@ def check_my_changes(changed_files: list[str]) -> str:
         rv = [t for t in tiered if t["tier"] == "review"]
         lines.append(f"- **Impact tiers:** {len(wb)} will-break, {len(mb)} may-break, {len(rv)} review")
 
-    if predictions[:5]:
-        lines.append("\n### Likely Missing")
-        for p in predictions[:5]:
-            lines.append(f"  - **{p['module']}** ({p['confidence']:.0%}) -- {p['reason']}")
+    if predictions:
+        # T-048: 2D urgency×likelihood tier split
+        imm = [p for p in predictions if p.get("causal", {}).get("urgency") == "IMMEDIATE" and p["confidence"] >= 0.6]
+        delayed = [p for p in predictions if p.get("causal", {}).get("urgency") == "DELAYED" and p["confidence"] >= 0.4]
+        seen = {p["module"] for p in imm} | {p["module"] for p in delayed}
+        other = [p for p in predictions[:8] if p["module"] not in seen]
+
+        def _fmt_pred(p: dict) -> str:
+            c = p.get("causal") or {}
+            if c:
+                sym = ",sym" if c.get("symmetric") else ""
+                tag = f" [lag={c['lag']}{sym}]"
+            else:
+                tag = ""
+            return f"  - **{p['module']}** ({p['confidence']:.0%}){tag} -- {p['reason']}"
+
+        if imm:
+            lines.append(f"\n### Likely Missing — IMMEDIATE_CERTAIN ({len(imm)}) — touch before merge")
+            for p in imm[:5]:
+                lines.append(_fmt_pred(p))
+        if delayed:
+            lines.append(f"\n### Likely Missing — DELAYED_LIKELY ({len(delayed)}) — plan to include")
+            for p in delayed[:5]:
+                lines.append(_fmt_pred(p))
+        if other:
+            lines.append(f"\n### Likely Missing — co-change signal ({len(other)})")
+            for p in other[:3]:
+                lines.append(_fmt_pred(p))
 
     if sec_flagged[:5]:
         lines.append("\n### Security Review Needed")
