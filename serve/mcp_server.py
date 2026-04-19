@@ -321,13 +321,19 @@ def get_blast_radius(files_or_modules: list[str], max_hops: int = 2) -> str:
                         parts.append(f"hop={sigs['static_hop']}")
                     if "cochange_weight" in sigs:
                         parts.append(f"cc={sigs['cochange_weight']}")
+                    urgency_badge = ""
                     if "granger" in sigs:
                         g = sigs["granger"]
                         urgency = g.get("urgency", "IMMEDIATE" if g["lag"] <= 2 else "DELAYED")
                         sym_tag = ",sym" if g.get("symmetric") else ""
                         parts.append(f"granger({urgency},lag={g['lag']}{sym_tag},p={g['p_value']:.4f})")
+                        # T-049: urgency×likelihood tier badge
+                        if urgency == "IMMEDIATE" and t["confidence"] >= 0.6:
+                            urgency_badge = " [IMMEDIATE_CERTAIN]"
+                        elif urgency == "DELAYED" and t["confidence"] >= 0.4:
+                            urgency_badge = " [DELAYED_LIKELY]"
                     svc = f" [{t['service']}]" if t.get("service") else ""
-                    lines.append(f"    {t['module']}{svc} ({', '.join(parts)})")
+                    lines.append(f"    {t['module']}{svc}{urgency_badge} ({', '.join(parts)})")
                 if len(tier_items) > 10:
                     lines.append(f"    ... and {len(tier_items) - 10} more")
 
