@@ -323,7 +323,9 @@ def get_blast_radius(files_or_modules: list[str], max_hops: int = 2) -> str:
                         parts.append(f"cc={sigs['cochange_weight']}")
                     if "granger" in sigs:
                         g = sigs["granger"]
-                        parts.append(f"granger(lag={g['lag']},p={g['p_value']:.4f})")
+                        urgency = g.get("urgency", "IMMEDIATE" if g["lag"] <= 2 else "DELAYED")
+                        sym_tag = ",sym" if g.get("symmetric") else ""
+                        parts.append(f"granger({urgency},lag={g['lag']}{sym_tag},p={g['p_value']:.4f})")
                     svc = f" [{t['service']}]" if t.get("service") else ""
                     lines.append(f"    {t['module']}{svc} ({', '.join(parts)})")
                 if len(tier_items) > 10:
