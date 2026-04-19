@@ -11,6 +11,8 @@ Works inside **Claude Code · Cursor · GitHub Copilot Agent · OpenHands · Win
 
 Static analysis tells you what *could* break. Git history tells you what *actually* breaks together. The gap between those two is where production incidents live — and where Ripple operates.
 
+**Especially relevant now:** AI coding agents (Cursor Background Agent, Copilot, Devin) ship PRs unattended. Ripple gives you blast radius analysis before those PRs merge.
+
 ---
 
 ## Try it in 60 seconds — no GPU, no config
