@@ -328,9 +328,63 @@ RE.MG = _orig_MG
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 12. bus_factor_warning in score_change_risk (T-057)
+# ══════════════════════════════════════════════════════════════════════════════
+print("\n=== 12. bus_factor_warning (T-057) ===")
+
+# Mock get_blast_radius to return 7 cochange neighbors (>5 threshold)
+_orig_gbr = RE.get_blast_radius
+RE.get_blast_radius = lambda mods, **kw: {
+    "cochange_neighbors": [{"module": f"M{i}", "type": "co-change"} for i in range(7)],
+    "import_neighbors": [],
+    "affected_services": ["svc-a"],
+    "tiered_impact": [],
+}
+# Mock predict_missing_changes and suggest_reviewers to return minimal data
+_orig_pmc = RE.predict_missing_changes
+_orig_sr  = RE.suggest_reviewers
+RE.predict_missing_changes = lambda *a, **kw: {"predictions": [], "coverage_score": 1.0}
+RE.suggest_reviewers = lambda *a, **kw: {"reviewers": [], "source": "ownership"}
+
+# Test 1: solo-owned module (one author has 95% of score) → warning triggered
+RE.ownership_index["__T057_SoloMod__"] = [
+    {"email": "solo@x.com", "name": "Solo Dev", "score": 95.0},
+    {"email": "other@x.com", "name": "Other", "score": 5.0},
+]
+result_solo = RE.score_change_risk(["__T057_SoloMod__"])
+check_true("T-057: solo-owned high-blast module triggers bus_factor_warning",
+           "bus_factor_warning" in result_solo,
+           f"result keys: {list(result_solo.keys())}")
+check_true("T-057: bus_factor_warning has affected_modules",
+           len(result_solo.get("bus_factor_warning", {}).get("affected_modules", [])) >= 1,
+           f"warning: {result_solo.get('bus_factor_warning')}")
+check_true("T-057: risk_score includes penalty (>= base)",
+           result_solo.get("risk_score", 0) >= 10,
+           f"risk_score: {result_solo.get('risk_score')}")
+
+# Test 2: distributed ownership (no one > 90%) → no warning
+RE.ownership_index["__T057_SharedMod__"] = [
+    {"email": "a@x.com", "name": "A", "score": 40.0},
+    {"email": "b@x.com", "name": "B", "score": 35.0},
+    {"email": "c@x.com", "name": "C", "score": 25.0},
+]
+result_shared = RE.score_change_risk(["__T057_SharedMod__"])
+check_true("T-057: distributed ownership does NOT trigger bus_factor_warning",
+           "bus_factor_warning" not in result_shared,
+           f"result keys: {list(result_shared.keys())}")
+
+# Cleanup
+RE.get_blast_radius = _orig_gbr
+RE.predict_missing_changes = _orig_pmc
+RE.suggest_reviewers = _orig_sr
+del RE.ownership_index["__T057_SoloMod__"]
+del RE.ownership_index["__T057_SharedMod__"]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SUMMARY
 # ══════════════════════════════════════════════════════════════════════════════
-n_sections = 11
+n_sections = 12
 print()
 if errors:
     print(f"\033[91m{len(errors)} FAILED: {errors}\033[0m")

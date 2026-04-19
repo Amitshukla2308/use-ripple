@@ -1302,7 +1302,8 @@ def suggest_reviewers(changed_modules: list, top_k: int = 5) -> dict:
             email = author["email"]
             # Weight: direct changes scored higher than blast radius neighbors
             weight = 2.0 if mod in changed_set else 1.0
-            score = author["commits"] * weight
+            raw_score = author.get("score", author.get("commits", 0))
+            score = raw_score * weight
 
             if email not in author_scores:
                 author_scores[email] = {
@@ -1313,7 +1314,7 @@ def suggest_reviewers(changed_modules: list, top_k: int = 5) -> dict:
                     "modules": [],
                 }
             author_scores[email]["score"] += score
-            author_scores[email]["commits"] += author["commits"]
+            author_scores[email]["commits"] += raw_score
             if mod not in author_scores[email]["modules"]:
                 author_scores[email]["modules"].append(mod)
 
@@ -1470,13 +1471,37 @@ def score_change_risk(modules: list, rules: dict | None = None) -> dict:
         "detail": f"Changes span {n_unique} service{'s' if n_unique != 1 else ''}",
     }
 
+    # ── 5. Bus Factor Warning ──
+    # Flag modules where a single author dominates (>90%) AND blast > 5
+    bus_factor_modules = []
+    if ownership_index:
+        for mod in changed:
+            own_key = _ownership_name_map.get(mod, "")
+            cc_key = _resolve_cc(mod)
+            authors = (ownership_index.get(mod) or ownership_index.get(own_key)
+                       or ownership_index.get(cc_key) or [])
+            if not authors:
+                continue
+            total_w = sum(a.get("score", a.get("commits", 0)) for a in authors)
+            if total_w <= 0 or len(authors) < 2:
+                continue
+            top_w = authors[0].get("score", authors[0].get("commits", 0))
+            if top_w / total_w > 0.90 and n_cochange > 5:
+                bus_factor_modules.append({
+                    "module": mod,
+                    "dominant_author": authors[0].get("name", ""),
+                    "dominance_pct": round(top_w / total_w * 100),
+                })
+
+    bus_factor_penalty = 10 if bus_factor_modules else 0
+
     # ── Composite Score ──
     composite = round(
         blast_score * weights["blast_radius"]
         + gap_score * weights["coverage_gap"]
         + reviewer_score * weights["reviewer_risk"]
         + spread_score * weights["service_spread"]
-    )
+    ) + bus_factor_penalty
 
     if composite <= 30:
         level = "LOW"
@@ -1498,6 +1523,9 @@ def score_change_risk(modules: list, rules: dict | None = None) -> dict:
     if n_unique > 3:
         parts.append(f"spans {n_unique} services")
 
+    if bus_factor_modules:
+        parts.append(f"{len(bus_factor_modules)} solo-owned module(s) in high-blast path")
+
     if not parts:
         if level == "LOW":
             recommendation = "Low risk change. Proceed normally."
@@ -1509,8 +1537,8 @@ def score_change_risk(modules: list, rules: dict | None = None) -> dict:
             top_names = [r["name"] for r in reviewers_list[:3]]
             recommendation += f" Suggested reviewers: {', '.join(top_names)}."
 
-    return {
-        "risk_score": composite,
+    result = {
+        "risk_score": min(composite, 100),
         "risk_level": level,
         "components": {
             "blast_radius": blast_component,
@@ -1520,6 +1548,14 @@ def score_change_risk(modules: list, rules: dict | None = None) -> dict:
         },
         "recommendation": recommendation,
     }
+    if bus_factor_modules:
+        result["bus_factor_warning"] = {
+            "affected_modules": bus_factor_modules,
+            "penalty_applied": bus_factor_penalty,
+            "detail": (f"{len(bus_factor_modules)} module(s) are solo-owned (>90% by one author) "
+                       f"and are in a high blast-radius path. Knowledge concentration risk."),
+        }
+    return result
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1694,7 +1730,7 @@ def get_why_context(symbol_name: str) -> dict:
     if owners:
         result["found"] = True
         result["owners"] = [
-            {"name": o.get("name", ""), "email": o.get("email", ""), "commits": o.get("commits", 0)}
+            {"name": o.get("name", ""), "email": o.get("email", ""), "commits": o.get("score", o.get("commits", 0))}
             for o in owners[:3]
         ]
 
@@ -1870,13 +1906,18 @@ def fast_search_reranked(query: str, top_k: int = 10) -> dict:
     # → reranker risks demoting exact-name matches in favour of body-matched results.
     # Threshold 0.30 derived from empirical calibration on 7-query benchmark (2026-04-17):
     # spread < 0.30 correlated with neutral/harmful reranking; ≥ 0.30 with genuine gains.
+    #
+    # T-014b dual gate: high-frequency single-term queries (e.g. "refund" → 3,600+ results)
+    # produce artificially compressed spread due to IDF saturation — low spread here means
+    # ambiguity-from-prevalence, NOT BM25 confidence. Override to RERANK when n_results > 500.
     _bm25_scores = sorted([n.get("_bm25_score", 0) for n in flat], reverse=True)
     _max_s = _bm25_scores[0] if _bm25_scores else 0
     _med_s = _bm25_scores[len(_bm25_scores) // 2] if _bm25_scores else 0
     _spread = (_max_s - _med_s) / _max_s if _max_s > 0 else 0
     _RERANK_THRESHOLD = 0.30
-    if _spread < _RERANK_THRESHOLD:
-        # BM25 is confident — reranking adds risk without reward; return top-k by BM25 score
+    _HIGH_FREQ_OVERRIDE = 500  # n_results threshold — above this, spread is unreliable
+    if _spread < _RERANK_THRESHOLD and len(flat) <= _HIGH_FREQ_OVERRIDE:
+        # BM25 is confident and query is specific — reranking adds risk without reward
         flat_sorted = sorted(flat, key=lambda x: -x.get("_bm25_score", 0))[:top_k]
         result: dict = defaultdict(list)
         for node in flat_sorted:

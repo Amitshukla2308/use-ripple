@@ -66,7 +66,7 @@ One config block gives your entire team's AI assistants access to your codebase'
 }
 ```
 
-**Setup guides:** [Cursor](docs/cursor.md) · [GitHub Copilot](docs/copilot.md) · [OpenHands](docs/openhands.md)
+**Setup guides:** [Cursor](docs/cursor.md) · [Windsurf](docs/windsurf.md) · [GitHub Copilot](docs/copilot.md) · [OpenHands](docs/openhands.md)
 
 | Tool | What it answers |
 |------|----------------|
@@ -87,6 +87,41 @@ One config block gives your entire team's AI assistants access to your codebase'
 | `trace_callers` | Who calls this? (upstream impact) |
 | `trace_callees` | What does this call? (downstream deps) |
 | `get_context` | Large context block — last resort |
+
+---
+
+## Coming from Cody?
+
+Sourcegraph discontinued Cody's free and pro tiers in April 2026. Cody is now enterprise-only at **$59/user/month** ($708/year per seat). A 10-person team pays $590/month just for code intelligence.
+
+Ripple is free, Apache 2.0, and self-hosted. Nothing leaves your machines.
+
+| | Cody (post-April 2026) | Ripple |
+|---|---|---|
+| **Price** | $59/user/month | Free |
+| **Hosting** | Sourcegraph SaaS | Self-hosted — your machine |
+| **IDE lock-in** | Primarily VS Code / JetBrains | Cursor · Copilot · OpenHands · Windsurf · Claude Code |
+| **Code leaves your network?** | Yes (uploaded to Sourcegraph) | No |
+| **Temporal signals** | None — retrieval over current code | Co-change, Granger causality, ownership decay |
+| **Blast radius** | Static import graph | Empirical — what *actually* breaks together (322% recall gain) |
+| **Who knows this file?** | Git blame (point-in-time) | Ownership decay — who's *actively* maintaining it now |
+
+### What Cody never had
+
+Cody reads the code. Ripple reads git history. That's the difference:
+
+- **Granger causal co-change** — file A causally predicts future changes in file B (not just correlation). 48,947 cross-service causal pairs in our reference deployment.
+- **Ownership decay** — git blame tells you who wrote it; Ripple tells you who still *owns* it (activity-weighted, recency-decayed).
+- **Bus factor warnings** — solo-owned + high blast-radius modules flagged before merge.
+- **Pioneer detection** — first commit to a module signals future co-change risk 2–4 quarters out.
+
+```bash
+pip install ripple-mcp
+# Add to .cursor/mcp.json, .vscode/mcp.json, or .openhands/config.yaml
+# Point at your repo — 15 tools instantly available
+```
+
+Cost: $0. Setup time: 5 minutes. Contract required: none.
 
 ---
 

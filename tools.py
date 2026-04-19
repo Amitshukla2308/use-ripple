@@ -921,6 +921,12 @@ def tool_fast_search_reranked(query: str, top_k: int = 10) -> str:
     return "\n".join(lines)
 
 
+def _sanitize(s: str, maxlen: int = 200) -> str:
+    """Strip newlines and angle brackets from user-controlled strings before MCP output.
+    Prevents prompt injection via git author names, emails, or docstrings."""
+    return s.replace("\r", " ").replace("\n", " ").replace("<", "\u003c").replace(">", "\u003e")[:maxlen]
+
+
 def tool_get_why_context(symbol_name: str) -> str:
     """WHY context: ownership, activity trend, Granger causality, anti-patterns."""
     data = RE.get_why_context(symbol_name)
@@ -930,12 +936,14 @@ def tool_get_why_context(symbol_name: str) -> str:
     lines = [f"WHY CONTEXT: {symbol_name}"]
 
     if data["summary"]:
-        lines.append(f"\nSummary: {data['summary']}")
+        lines.append(f"\nSummary: {_sanitize(data['summary'], 400)}")
 
     if data["owners"]:
         lines.append("\nOwners:")
         for o in data["owners"]:
-            lines.append(f"  {o['name']} <{o['email']}> — {o['commits']} commits")
+            name = _sanitize(o['name'], 80)
+            email = _sanitize(o['email'], 100)
+            lines.append(f"  {name} <{email}> — {o['commits']} commits")
 
     if data["activity"]:
         act = data["activity"]
